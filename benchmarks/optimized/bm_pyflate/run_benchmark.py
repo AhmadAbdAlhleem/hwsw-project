@@ -17,6 +17,7 @@ but ideally the problem would be found...
 """
 
 import hashlib
+from collections import Counter
 import os
 import struct
 
@@ -332,15 +333,36 @@ def extra_length_bits(n):
 
 
 def move_to_front(l, c):
-    l[:] = l[c:c + 1] + l[0:c] + l[c + 1:]
+    # OPTIMIZATION 5: this runs once per decoded symbol, and the original
+    # rebuilt the entire (up to 256 entry) list every time -- three slice
+    # objects, a two-way concatenation, and then l[:] = ... copied the whole
+    # thing back. pop()/insert() do the same reordering as a single C-level
+    # memmove, and c == 0 becomes a genuine no-op instead of a full rebuild.
+    if c:
+        l.insert(0, l.pop(c))
 
 
 def bwt_transform(L):
-    # Semi-inefficient way to get the character counts
-    F = bytes(sorted(L))
+    # OPTIMIZATION 6: the original comment already admits this is a
+    # "semi-inefficient way to get the character counts". It sorted the whole
+    # block (O(n log n)) and then ran 256 separate F.find() scans over the
+    # sorted copy (O(256*n)) purely to learn, for each byte value, how many
+    # bytes compare less than it.
+    #
+    # That is just a cumulative histogram. collections.Counter builds the
+    # histogram in C in a single O(n) pass, and a 256-step prefix sum gives the
+    # same base offsets, so both the sort and the 256 scans disappear.
+    #
+    # Equivalence note: for a byte value absent from L the original stored -1
+    # (find() failure) while the prefix sum stores the running total. That
+    # difference is unobservable -- base[symbol] is only ever indexed by
+    # symbols that actually occur in L.
+    counts = Counter(L)
     base = []
+    total = 0
     for i in range(256):
-        base.append(F.find(int2byte(i)))
+        base.append(total)
+        total += counts[i]
 
     pointers = [-1] * len(L)
     for i, symbol in enumerate(L):
@@ -372,9 +394,13 @@ def bwt_reverse(L, end):
         # out where the off-by-one-ism is yet---that actually produced
         # the cyclic loop.
 
-        for i in range(len(L)):
+        # OPTIMIZATION 7: the inverse BWT is a serial pointer chase, so it
+        # cannot be vectorised -- but binding the list, the table and the bound
+        # method to locals removes three global/attribute lookups per byte.
+        append = out.append
+        for _ in range(len(L)):
             end = T[end]
-            out.append(L[end])
+            append(L[end])
 
     return bytes(out)
 
