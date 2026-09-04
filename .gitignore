@@ -1,0 +1,25 @@
+# --- profiling artifacts (large / regenerable) ---
+perf.data
+perf.data.old
+*.perf.data
+perf_results_raw/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+
+# --- pyperformance working dirs ---
+pyperformance/
+*.egg-info/
+
+# --- build ---
+*.o
+*.so
+*.out
+
+# --- os ---
+Thumbs.db
+.DS_Store

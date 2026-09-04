@@ -1,0 +1,33 @@
+AI TOOL PROMPTS — HWSW Project
+==============================
+Tool used: Claude (Anthropic), via Claude Code.
+This file is maintained incrementally: every prompt we gave the assistant is
+recorded here in order, as required by the project specification (section 10).
+
+---------------------------------------------------------------------------
+[1] Project kickoff / material digest
+---------------------------------------------------------------------------
+"The project just dropped, we need to solve it like we did in the past 2
+homeworks. Please read the project PDF, and activate agents on all the
+lectures, tutorials, guides and previous homework in this directory so we
+solve it perfectly. Follow the instructions of the PDF and use all the course
+material if needed. Also the benchmarks don't run locally, let's run on the
+machine we have."
+
+Sub-prompts issued by the assistant to its own research agents:
+  (a) "Digest the LECTURES ... build a knowledge base for a final project on
+       profiling Python pyperformance benchmarks with perf + flame graphs,
+       optimizing them, and proposing a hardware accelerator."
+  (b) "Digest the TUTORIALS ... extract every practical technique needed:
+       perf cookbook, flame graph procedure, the tut2aux code demos."
+  (c) "Digest the GUIDES and PREVIOUS HOMEWORK ... establish the working
+       environment and the expected report style/quality bar."
+
+---------------------------------------------------------------------------
+[2] Benchmark selection
+---------------------------------------------------------------------------
+"Which 2 benchmarks should we do? The majority of students used Nbody +
+Raytrace, but do what you see best. Explain how they differ and why we need
+benchmarks in the first place."
+
+---------------------------------------------------------------------------
