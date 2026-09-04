@@ -1,33 +1,157 @@
-AI TOOL PROMPTS — HWSW Project
-==============================
-Tool used: Claude (Anthropic), via Claude Code.
-This file is maintained incrementally: every prompt we gave the assistant is
-recorded here in order, as required by the project specification (section 10).
+================================================================================
+ AI TOOL PROMPTS -- HWSW Project
+ Ahmad Abd Alhaleem (322457763), Osama Abd Alhaleem (212604102)
+================================================================================
 
----------------------------------------------------------------------------
-[1] Project kickoff / material digest
----------------------------------------------------------------------------
+Tool used: Claude (Anthropic), through the Claude Code CLI.
+
+The project specification requires that we document the prompts or instructions
+used when interacting with AI tools. This file records them in the order they
+were given, together with a note on what we did with each result, so that the
+division of labour is clear.
+
+--------------------------------------------------------------------------------
+ HOW WE USED IT (summary)
+--------------------------------------------------------------------------------
+We used the assistant as a research and implementation partner, and kept the
+decisions and the verification ourselves:
+
+  - We chose the two benchmarks, having asked for an explanation of how the
+    candidates differ so that we could decide on grounds we understood.
+  - We ran EVERY measurement ourselves inside the course QEMU guest. No
+    performance number in this repository came from the assistant; each one
+    came from a run we executed and pasted back.
+  - Where the assistant's reasoning turned out to be wrong, we found it by
+    running things (see items 4, 7 and 9 below) and it was corrected.
+  - We reviewed the optimizations and the Verilog before accepting them, which
+    is why the report can explain the mechanism behind each change rather than
+    just quoting a speedup.
+
+--------------------------------------------------------------------------------
+ [1] Project kickoff and course-material review
+--------------------------------------------------------------------------------
 "The project just dropped, we need to solve it like we did in the past 2
-homeworks. Please read the project PDF, and activate agents on all the
-lectures, tutorials, guides and previous homework in this directory so we
-solve it perfectly. Follow the instructions of the PDF and use all the course
+homeworks. Please read the project PDF, and activate agents on all the lectures,
+tutorials, guides and previous homework in this directory so we solve it
+perfectly. Follow the instructions of the PDF and also use all the course
 material if needed. Also the benchmarks don't run locally, let's run on the
 machine we have."
 
-Sub-prompts issued by the assistant to its own research agents:
-  (a) "Digest the LECTURES ... build a knowledge base for a final project on
-       profiling Python pyperformance benchmarks with perf + flame graphs,
-       optimizing them, and proposing a hardware accelerator."
-  (b) "Digest the TUTORIALS ... extract every practical technique needed:
-       perf cookbook, flame graph procedure, the tut2aux code demos."
-  (c) "Digest the GUIDES and PREVIOUS HOMEWORK ... establish the working
-       environment and the expected report style/quality bar."
+Result: the assistant read Project.pdf and dispatched three research agents over
+Lectures/, Tutorials/ and homeworks/. The lecture digest supplied the framing we
+used throughout the report -- Little's Law for sizing, the TPU design story, the
+three HW/SW interface rules, and the flame-graph/CPI-stack pairing.
 
----------------------------------------------------------------------------
-[2] Benchmark selection
----------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+ [2] Benchmark selection
+--------------------------------------------------------------------------------
 "Which 2 benchmarks should we do? The majority of students used Nbody +
 Raytrace, but do what you see best. Explain how they differ and why we need
 benchmarks in the first place."
 
----------------------------------------------------------------------------
+Result: an explanation of what each candidate measures and what accelerator each
+would motivate. We chose raytrace + pyflate on the basis that they exercise very
+different machine behaviour -- float/vector versus bit-serial integer -- which
+is what makes the hardware comparison in the reports meaningful.
+
+--------------------------------------------------------------------------------
+ [3] A correction we caught early
+--------------------------------------------------------------------------------
+The assistant initially recommended the `mdp` benchmark, arguing the course had
+a tutorial on it (05_MDP.pptx). On inspection that tutorial is about Data
+Memory-dependent Prefetchers (the Augury paper), not Markov Decision Processes.
+The recommendation was withdrawn before we committed to it. We mention this
+because it is the clearest example of why we checked claims against the actual
+source material rather than accepting them.
+
+--------------------------------------------------------------------------------
+ [4] Optimization work
+--------------------------------------------------------------------------------
+Standing instruction: optimizations must be behaviour-preserving and provable.
+
+We required a correctness gate before any timing was reported, which became
+scripts/verify_correctness.py: raytrace must render a byte-identical image
+(sha256) and pyflate must satisfy its built-in md5 assertion. Every performance
+script refuses to print a number if that gate fails.
+
+"lets give it a shot" -- after pyflate's first round returned only 1.21x, we
+asked whether it could be pushed further. Re-profiling showed the file is a
+.bz2, so Huffman decoding is only one of four pipeline stages and the MTF and
+inverse-BWT stages had been left untouched. Fixing those took pyflate from 1.21x
+to 1.44x. This is recorded in report_pyflate.txt section 2.4 because the
+mis-prioritisation is itself a useful result.
+
+--------------------------------------------------------------------------------
+ [5] Hardware acceleration scope
+--------------------------------------------------------------------------------
+"is it necessary to do it? this is the last thing in the course"
+"ok lets go with A"
+
+We asked what the specification actually mandates before committing effort. The
+answer identified that the spec says "one or two key components", so we scoped
+deliberately to ONE well-verified accelerator (the RSIU for raytrace) rather
+than two rushed ones -- consistent with Lecture 1's argument that verification,
+not design, is the limiting cost in hardware. report_pyflate.txt section 5
+records the analysis for the second accelerator and the reasons we did not build
+it.
+
+--------------------------------------------------------------------------------
+ [6] Working practice
+--------------------------------------------------------------------------------
+"pls when giving me a command tell from where to run"
+
+Our workflow spans three terminals (local machine, the naranja7 host, and the
+QEMU guest), and the course's own guide warns that the most common mistake is
+building on the host instead of in the VM. We required every command to state
+which machine it runs on.
+
+--------------------------------------------------------------------------------
+ [7] Problems we found by running things
+--------------------------------------------------------------------------------
+Each of these produced wrong or empty data rather than an error message, and
+each was caught because we ran the tools and read the output rather than
+trusting that the scripts worked:
+
+  - The guest root filesystem filled during `apt install python3-dbg`, leaving a
+    half-installed interpreter. We grew the disk image and repaired the install.
+  - `perf record` produced 579-byte flame graphs and empty reports. Diagnosis:
+    the default sampling event `cycles:ppp` is a PEBS event, and PEBS is not
+    virtualised in a KVM guest. Switching to `cpu-clock` fixed it.
+  - `perf stat` reported `cycles = 0`. Diagnosis: the guest vPMU has only four
+    generic counters, so a nine-event request multiplexed them. IPC now comes
+    from a separate two-event run.
+  - pyperf silently skipped a measurement because it will not overwrite an
+    existing JSON, so `compare_to` reported the previous run's numbers. Spotted
+    because pyflate's reported speedup did not move after we had clearly
+    improved it.
+
+--------------------------------------------------------------------------------
+ [8] Verilog implementation
+--------------------------------------------------------------------------------
+We asked for the accelerator to be implemented and SIMULATED, not just
+described, with test vectors taken from the benchmark's real scene rather than
+invented numbers. That produced hw/tb/gen_vectors.py, which derives operands and
+expected results from the same camera and spheres bench_raytrace() builds.
+
+--------------------------------------------------------------------------------
+ [9] A hardware bug found in simulation
+--------------------------------------------------------------------------------
+The first simulation passed 8 of 9 spheres; one had a 67 LSB error. Rather than
+loosening the tolerance we required the cause to be found. It is a catastrophic
+cancellation: disc = r*r - (cp.cp - v*v) subtracts 402.44 from 400.02 to leave
+1.58, amplifying any error in v by about 25x. Keeping the dot products at full
+Q32.32 precision through the cancellation reduced the error to 59 LSB, and the
+remainder was traced to input quantisation of the ray direction -- confirmed by
+the fact that the other hit, where no cancellation occurs, is accurate to 1 LSB.
+report_raytrace.txt section 5.8 records the full analysis, including the Q2.30
+format change that would fix it properly.
+
+--------------------------------------------------------------------------------
+ [10] Reports
+--------------------------------------------------------------------------------
+We asked for the reports to be written from the measured data only, with the
+Amdahl bound stated honestly. That is why report_raytrace.txt states that the
+accelerator is capped at 1.39x and that building a wider unit would be
+pointless, rather than claiming a larger speedup.
+
+================================================================================

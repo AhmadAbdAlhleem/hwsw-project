@@ -1,0 +1,646 @@
+================================================================================
+ HWSW PROJECT -- BENCHMARK REPORT: raytrace
+ Hardware/Software Co-Design (00460882), Technion
+ Ahmad Abd Alhaleem (322457763), Osama Abd Alhaleem (212604102)
+================================================================================
+
+RESULT SUMMARY
+    Baseline    2.15 s  +/- 0.02 s
+    Optimized   719 ms  +/- 9 ms
+    Speedup     2.98x faster  (66.6 % reduction)   [required: >= 7 %]
+    Output      byte-identical rendered image (sha256 verified)
+
+All measurements were taken inside the course QEMU/KVM guest:
+    Ubuntu 22.04.5, kernel 5.15.0-1080-kvm, Python 3.10.12 (python3-dbg),
+    perf 5.15.179, pyperf 2.10.0,
+    Intel Xeon E5-2630 v3 @ 2.40 GHz (Haswell), 8 vCPU.
+
+
+================================================================================
+ 1. OVERVIEW
+================================================================================
+
+WHAT THE BENCHMARK DOES
+    bm_raytrace renders a 100x100 image of a simple scene with a recursive ray
+    tracer written in pure Python (originally by Callum and Tony Garnock-Jones,
+    2008). The scene contains seven spheres, one checkerboard half-space (the
+    ground plane) and two point lights. For every pixel the renderer casts a
+    primary ray, finds the nearest intersection, then shades that point -- which
+    recursively casts a reflection ray and one shadow ray per light.
+
+LIBRARIES USED
+    Only the Python standard library: `math` (sqrt, tan, pi) and `array` (the
+    output framebuffer, array('B')). `pyperf` is the measurement harness, not
+    part of the workload. There is no numpy and no C extension: every floating
+    point operation runs as interpreted bytecode. That is what makes this
+    benchmark a pure measure of interpreter and object-model overhead.
+
+DATA STRUCTURES AND ALGORITHMS
+    Vector, Point   3 floats each, plain classes with a per-instance __dict__.
+                    All arithmetic is operator overloading: __add__, __sub__,
+                    scale(), dot(), cross(), normalized().
+    Sphere          centre (Point) + radius; intersectionTime(ray) solves the
+                    ray-sphere quadratic; normalAt(p) returns the surface normal.
+    Halfspace       point + normal; a much cheaper intersection test.
+    Ray             origin Point + a direction Vector normalised in __init__.
+    Canvas          array('B') of width*height*3 bytes.
+    Scene           list of (object, surface) pairs, plus light positions.
+
+    Algorithm per pixel: build a primary ray, test it against every object,
+    take the nearest hit, then shade. Shading casts one reflection ray
+    (recursion depth limited to 3) and, for each light, one shadow ray tested
+    against every object again.
+
+    Measured workload for one frame (deterministic call counts):
+        rayColour() calls .................  15,333
+        Sphere.intersectionTime() .........  179,457
+        Halfspace.intersectionTime() ......   25,501
+        total intersection tests ..........  204,958
+        sphere tests per ray ..............     11.7
+
+    So the benchmark is, structurally, 200k ray-object intersection tests
+    wrapped in a very large amount of Python object churn.
+
+
+================================================================================
+ 2. INITIAL ANALYSIS
+================================================================================
+
+2.1 HARDWARE COUNTERS (perf stat, baseline)
+
+    Elapsed (5 loops) ............ 10.85 s
+    Task-clock ................... 10 846 ms   (0.999 CPUs utilised)
+    Cycles ....................... 25.98 B
+    Instructions ................. 53.33 B
+    IPC .......................... 2.07
+    Branches ..................... 12.93 B
+    Branch-miss rate ............. 0.89 %
+    Cache references ............. 38.0 M
+    Cache-miss rate .............. 0.45 %
+    Page faults .................. 3 391
+    Context switches ............. 10
+
+    Read this first: IPC of 2.07 with a 0.89 % branch-miss rate and a 0.45 %
+    cache-miss rate says the processor is NOT stalling. It is not memory bound,
+    not branch bound, and not I/O bound. It is simply being asked to retire
+    53.3 billion instructions. The bottleneck is the sheer VOLUME of work, so
+    the optimization target is instruction count, not locality.
+
+2.2 FLAME GRAPH (perf record -F 999 -g, results/raytrace_base_flame.svg)
+
+    Top self-time frame:  _PyEval_EvalFrameDefault ......... 28.11 %
+
+    A methodological note. perf's default sampling event is cycles:ppp, a
+    PRECISE (PEBS) event, and PEBS is not virtualised in a KVM guest: our first
+    attempt captured almost nothing (14 KB perf.data, a 579-byte flame graph).
+    Sampling on cpu-clock, a software time-based event, produced a real 136 KB
+    profile. Time-based sampling is also what a flame graph actually wants.
+
+    The flame graph is dominated by _PyEval_EvalFrameDefault, CPython's bytecode
+    dispatch loop, with the rest spread thinly across pymalloc and the object
+    allocator. That is the correct answer to "where does the time go" at the
+    machine level -- interpretation, not computation -- but it cannot tell us
+    WHICH Python function is responsible, because every Python frame executes
+    inside that same C function. Lecture 4 makes exactly this point: a flame
+    graph shows where, not why, and should be used together with a second view.
+
+2.3 PYTHON-LEVEL ATTRIBUTION (cProfile, baseline)
+
+    tottime  share   calls     function
+    ------------------------------------------------------------------
+    0.336    16.8 %  509,871   Vector.dot
+    0.290    14.5 %  277,865   Point.__sub__
+    0.236    11.8 %  179,457   Sphere.intersectionTime
+    0.174     8.7 %  452,943   Vector.__init__
+    0.124     6.2 %   10,666   Scene._lightIsVisible
+    0.101     5.1 %  149,743   Vector.scale
+    0.085     4.2 %  109,887   Vector.normalized
+    0.075     3.8 %  109,887   Vector.magnitude
+    0.074     3.7 %  520,539   Vector.mustBeVector
+    0.066     3.3 %   15,265   rayColour <listcomp>
+    0.061     3.1 %   98,172   Point.__init__
+    0.050     2.5 %    5,333   SimpleSurface.colourAt
+
+2.4 BOTTLENECKS IDENTIFIED
+
+    Adding up the vector-arithmetic primitives -- dot, __sub__, __init__, scale,
+    normalized, magnitude, mustBeVector -- gives 56.8 % of runtime. The actual
+    geometry (intersectionTime) is only 11.8 %. The benchmark spends five times
+    more effort MANIPULATING vector objects than doing the geometry those
+    objects exist to express.
+
+    B1. Type assertions executed at runtime, 520,539 times.
+        dot() begins with `other.mustBeVector()`; __add__ calls
+        `other.isPoint()`. These are real Python method calls -- frame push,
+        execution, frame pop -- performed on every single arithmetic operation
+        purely to assert an operand's type. They compute nothing. 3.7 % of the
+        entire runtime is spent in a function whose body is `return self`.
+
+    B2. Every class carries a per-instance __dict__.
+        Vector, Point, Sphere, Ray and the surfaces are plain classes, so each
+        instance allocates a dictionary. With 452,943 Vector allocations per
+        frame this dominates both allocation cost and attribute-access cost
+        (a dict probe rather than a fixed slot offset).
+
+    B3. Operators allocate a new object per operation.
+        509,871 dot() calls and 277,865 __sub__ calls per frame, each of the
+        latter constructing a fresh Vector.
+
+    B4. normalized() is a five-deep call chain.
+        normalized -> scale -> magnitude -> dot -> mustBeVector, plus a
+        throwaway Vector, executed for every Ray constructed (109,887 times).
+
+    B5. A loop-invariant recomputed per iteration.
+        Scene._lightIsVisible built `Ray(p, l - p)` INSIDE its loop over scene
+        objects, so an identical shadow ray -- including a normalisation -- was
+        reconstructed once per object instead of once per light.
+
+    B6. A materialised intermediate list per ray.
+        rayColour built a list of (object, t, surface) tuples for every scene
+        object, then scanned it in firstIntersection() to find the nearest hit.
+
+    B7. Dead code.
+        CheckerboardSurface.baseColourAt computed `v.scale(1.0/self.checkSize)`
+        and discarded the result -- an allocation per shading query for nothing.
+
+
+================================================================================
+ 3. OPTIMIZATIONS
+================================================================================
+
+    Every change is a behaviour-preserving refactor. No algorithm was replaced,
+    no library added, and no approximation introduced -- the renderer still
+    performs exactly the same 204,958 intersection tests and produces exactly
+    the same image.
+
+    O1  __slots__ on Vector, Point, Sphere, Halfspace, Ray, Canvas, Scene and
+        both surface classes. Removes the per-instance dict; attribute access
+        becomes a slot load. (fixes B2)
+
+    O2  Replaced the isPoint()/mustBeVector() METHOD CALLS with a class-level
+        boolean `_isPoint`, and removed the type assertions from dot(),
+        __sub__() and cross() entirely -- they only ever raised for programs
+        that were already broken. A class-attribute load costs a fraction of a
+        method call. (fixes B1)
+
+    O3  Inlined normalized() to a single sqrt and one allocation, and inlined
+        magnitude(). Removes four call levels and a temporary. (fixes B4)
+
+    O4  Rewrote Sphere.intersectionTime to work directly on scalar components
+        rather than constructing an intermediate Vector and calling dot() twice.
+        Removes one allocation and three method calls per object per ray -- and
+        this function runs 179,457 times per frame. (fixes B3)
+
+    O5  Hoisted the loop-invariant shadow ray out of _lightIsVisible. (fixes B5)
+
+    O6  Fused the intersection list comprehension with firstIntersection into a
+        single pass that tracks the nearest hit, removing one list and one tuple
+        per object per ray. Selection rule unchanged. (fixes B6)
+
+    O7  Deleted the discarded v.scale() call. (fixes B7)
+
+    O8  Bound math.sqrt to a module-level local, removing a global lookup plus
+        attribute lookup on every intersection and normalisation.
+
+    WHAT DID NOT WORK / WAS CONSIDERED AND REJECTED
+
+    - Replacing the Vector class with plain tuples, or with numpy arrays. Both
+      were rejected: tuples would have required rewriting every call site (a
+      different program, not an optimization of this one), and numpy is
+      catastrophically bad here because each vector is only 3 elements -- the
+      per-call ndarray overhead exceeds the arithmetic it replaces. numpy wins
+      on large arrays, and this workload has none.
+    - Caching normalised ray directions across pixels. Rejected: every pixel
+      generates a genuinely different direction, so there is nothing to reuse.
+    - Removing the try/finally in rayColour that maintains recursionDepth. Kept,
+      because it is load-bearing for correctness on the recursive reflection
+      path.
+
+
+================================================================================
+ 4. PERFORMANCE COMPARISON
+================================================================================
+
+4.1 END TO END (pyperf, 20 processes x 3 values each)
+
+    Baseline .......... 2.15 s +/- 0.02 s
+    Optimized ......... 719 ms +/- 9 ms
+    -------------------------------------------
+    2.98x faster, a 66.6 % reduction.
+
+    Standard deviations are under 1.5 % of the mean, so the difference is far
+    outside measurement noise.
+
+4.2 HARDWARE COUNTERS
+
+    Metric                Baseline     Optimized    Change
+    ---------------------------------------------------------------
+    Elapsed (5 loops)     10.85 s      3.79 s       2.86x faster
+    Task-clock            10 846 ms    3 787 ms     2.86x less
+    Cycles                25.98 B      9.02 B       2.88x fewer
+    Instructions          53.33 B      19.71 B      2.71x fewer
+    IPC                   2.07         2.18         +5.3 %
+    Branches              12.93 B      4.71 B       2.74x fewer
+    Branch-miss rate      0.89 %       0.73 %       lower
+    Cache references      38.0 M       15.3 M       2.49x fewer
+    Cache misses (abs)    171 475      158 894      slightly fewer
+    Cache-miss rate       0.45 %       1.04 %       HIGHER (see below)
+    Page faults           3 391        3 391        IDENTICAL
+    Context switches      10           4            negligible
+
+    The speedup is removed work, not better execution efficiency. Cycles fall
+    2.88x and instructions 2.71x while IPC barely moves (2.07 -> 2.18). The
+    processor executes about as efficiently per cycle as before; it simply has
+    2.7 billion fewer instructions to run per loop.
+
+    Page faults are IDENTICAL (3 391 vs 3 391, to the fault). The memory
+    footprint did not change, so nothing here is an allocation or I/O artefact:
+    the difference is pure user-space compute. This is the same style of
+    invariant we used in HW1, where matching instruction counts proved that only
+    the data layout had changed.
+
+    The cache-miss RATE rises (0.45 % -> 1.04 %) while performance improves.
+    This is the trap Tutorial 2 sets deliberately with its 2D-array demo, where
+    the faster row-major version had a 9x worse miss rate. A rate is a quotient
+    and here the denominator collapsed: cache REFERENCES fell 2.49x because we
+    deleted hundreds of thousands of object allocations and attribute lookups,
+    nearly all of which were hits. The absolute miss count actually fell too
+    (171 475 -> 158 894). Report absolute counts, not just rates.
+
+4.3 WHERE THE WORK WENT (cProfile call counts, per frame)
+
+    Function                Before      After      Reduction
+    -------------------------------------------------------------
+    Vector.dot              509,871     41,070     12.4x fewer calls
+    Point.__sub__           277,865     26,236     10.6x fewer calls
+    Vector.__init__         452,943    125,285      3.6x fewer objects
+    Vector.normalized       109,887     37,715      2.9x fewer
+    Vector.mustBeVector     520,539          0      eliminated
+    Sphere.intersectionTime 179,457    179,457      UNCHANGED
+
+    The last row is the important one. The number of intersection tests is
+    identical, which confirms we did not change the algorithm or skip work --
+    we made the same geometry cost less. Meanwhile mustBeVector, which consumed
+    3.7 % of the baseline across half a million calls, is gone entirely.
+
+4.4 THE PROFILE AFTER OPTIMIZATION
+
+    tottime  share   calls     function
+    ------------------------------------------------------------------
+    0.188    28.1 %  179,457   Sphere.intersectionTime      <-- now dominant
+    0.068    10.1 %   15,333   Scene.rayColour
+    0.042     6.3 %   37,715   Vector.normalized
+    0.041     6.2 %   10,666   Scene._lightIsVisible
+    0.041     6.1 %    5,333   SimpleSurface.colourAt
+    0.037     5.6 %  125,285   Vector.__init__
+
+    The shape of the problem has changed. Before, the geometry was buried under
+    object-model overhead (intersectionTime 11.8 %, primitives 56.8 %). Now the
+    overhead is largely gone and the actual mathematics dominates at 28.1 %.
+
+    In the flame graph the same shift appears as _PyEval_EvalFrameDefault RISING
+    from 28.11 % to 34.10 % of self time. Its absolute cost fell with everything
+    else; what changed is the mix. Having stripped the removable Python-level
+    overhead, what remains is a larger fraction of irreducible interpreter
+    dispatch -- the floor that software optimization cannot go below.
+
+    That is precisely the point at which the argument for hardware begins.
+
+
+================================================================================
+ 5. HARDWARE ACCELERATION PROPOSAL: RAY-SPHERE INTERSECTION UNIT (RSIU)
+================================================================================
+
+5.1 WHY THIS COMPONENT
+
+    After optimization, Sphere.intersectionTime is the single largest consumer
+    of runtime (28.1 %) and runs 179,457 times per frame. It is also an ideal
+    hardware candidate for reasons the other hotspots are not:
+
+      - Fixed shape. Every invocation does exactly the same arithmetic on the
+        same operand count. There are no variable-length loops.
+      - No data-dependent control. The miss case (disc < 0) is a predicate on
+        the RESULT, not a branch that changes the computation.
+      - High arithmetic density with tiny operands: 16 bytes of sphere in,
+        8 bytes of result out, for 8 multiplies, 6 adds and a square root.
+      - Natural batching. The call site is
+            for (o, s) in self.objects: o.intersectionTime(ray)
+        i.e. ONE ray against MANY spheres -- a stream, not a scalar call.
+
+    Following the TPU's design story from Lecture 5 (profile, identify one
+    dominant primitive, adopt a simple well-understood pattern for exactly that
+    primitive), the RSIU implements exactly that one primitive and nothing else.
+
+5.2 DATAFLOW: RAY-STATIONARY, SPHERES STREAMING
+
+    Because the inner loop tests one ray against many spheres, the ray is loaded
+    once into registers and held there while spheres stream past, one per cycle.
+    This is the same weight-stationary dataflow the TPU uses ("weights preloaded
+    to array, and then inputs are streamed"), and it means the six ray operands
+    are fetched once per ray instead of once per sphere.
+
+5.3 INPUTS AND OUTPUTS
+
+    Numeric format: Q16.16 signed fixed point (32-bit). Range +/-32768,
+    resolution 2^-16 = 1.5e-5. The benchmark's scene fits within +/-16 units.
+
+    Stationary inputs (written once per ray, 6 x 32 bit = 24 bytes):
+        ray_px, ray_py, ray_pz     ray origin
+        ray_vx, ray_vy, ray_vz     ray direction (pre-normalised by the host)
+        ray_load                   1-cycle strobe
+
+    Streaming input (one per cycle, 16 bytes + 8-bit tag):
+        sph_cx, sph_cy, sph_cz     sphere centre
+        sph_r                      radius
+        sph_id                     tag, returned with the result
+        sph_valid
+
+    Outputs (one per cycle, in the order presented):
+        res_valid
+        res_id                     the tag of the sphere this result belongs to
+        res_hit                    1 = intersects (disc >= 0)
+        res_t                      intersection time, Q16.16
+
+    Target operating frequency: 200 MHz. The critical path is one 32x32 signed
+    multiply (stage S2) or one compare-subtract of a 26-bit value (a square-root
+    stage); on a mid-range FPGA a 32x32 multiply closes comfortably at 200 MHz
+    using a DSP block, and on an ASIC process this would be conservative.
+
+5.4 HARDWARE ARCHITECTURE
+
+    Datapath (hw/rtl/ray_sphere_unit.v), 30 pipeline stages total:
+
+      S1   cp = sphere.centre - ray.point                    3 subtractors
+      S2   8 parallel multiplies: cp.*rv, cp.*cp, r*r        8 multipliers
+      S3   two 3-input adder trees -> v, cp.cp               2 adder trees
+      S4   disc = r*r - (cp.cp - v*v); hit = (disc >= 0)     1 mult, 2 sub
+      S5.. pipelined square root                             24 stages
+      S29  t = v - sqrt(disc)                                1 subtractor
+
+    Square root (hw/rtl/fxp_sqrt.v): a non-restoring digit-recurrence square
+    root, one result bit per stage. Each stage is a compare, a conditional
+    subtract and two shifts -- no multiplier and no divider. Because it is fully
+    pipelined it accepts a new radicand every cycle.
+
+    Control logic: there is essentially none, and that is the design's main
+    virtue. There is no FSM, no stall, no back-pressure and no branch. A miss is
+    carried as a flag beside the result. Lecture 5 identifies exactly this as
+    the systolic property -- "circuit inputs are processed on each cycle, no
+    control circuitry, most efficient silicon utilisation" -- and the price of
+    that property is that inputs must always be ready, which the FIFO guarantees.
+
+    Sizing the FIFOs with Little's Law (L = lambda * W):
+        lambda = 1 sphere/cycle (the design target)
+        W      = 30 cycles (measured pipeline latency, confirmed in simulation)
+        L      = 1 * 30 = 30 spheres in flight
+    So the input and result FIFOs must each hold at least 30 entries; we specify
+    32 (the next power of two). Under-sizing them would stall the pipeline and
+    forfeit the one-per-cycle throughput the design exists to provide.
+
+5.5 BLOCK DIAGRAM
+
+    HOST (CPython)                            RSIU ACCELERATOR (PCIe endpoint)
+  +---------------------+                 +-------------------------------------+
+  | Scene.rayColour     |                 |                                     |
+  |                     |  1. write ray   |  +-----------------------------+    |
+  | rsiu.set_ray(ray) --+---- MMIO BAR0 ->|  | Ray registers (stationary)  |    |
+  |                     |                 |  | px py pz | vx vy vz         |    |
+  | rsiu.test(spheres)  |  2. DMA spheres |  +--------------+--------------+    |
+  |                  ---+==== PCIe ======>|  +-------------v--------------+     |
+  |                     |                 |  | Sphere FIFO (32 deep)      |     |
+  |                     |  3. doorbell GO |  +-------------+--------------+     |
+  |                  ---+---- MMIO BAR0 ->|                | 1 sphere/cycle     |
+  |                     |                 |  +-------------v--------------+     |
+  |                     |                 |  | S1  cp = C - P             |     |
+  |                     |                 |  | S2  8 x multiply           |     |
+  |                     |                 |  | S3  adder trees (Q32.32)   |     |
+  |                     |                 |  | S4  disc + hit test        |     |
+  |                     |                 |  | S5..S28 pipelined sqrt     |     |
+  |                     |                 |  | S29 t = v - sqrt(disc)     |     |
+  |                     |                 |  +-------------+--------------+     |
+  |                     |  4. results DMA |  +-------------v--------------+     |
+  | <- (id, hit, t) ----+<=== PCIe =======|  | Result FIFO (32 deep)      |     |
+  |                     |                 |  +----------------------------+     |
+  | 5. poll done bit ---+<--- MMIO BAR0 --|  status / completion count          |
+  +---------------------+                 +-------------------------------------+
+
+    Attachment follows the model in Lecture 5 (PCIe) and Lecture 6 slide 40:
+    a BAR-mapped register block for control, a descriptor of (address, length)
+    for the sphere array, and a doorbell -- writing 1 to the GO register. The
+    device DMAs the sphere list, and results are DMA'd back into a host buffer.
+    Completion is POLLED rather than interrupt-driven: Lecture 4 notes that at
+    high rates "interrupt handling is too slow. Modern systems use polling",
+    and at 179,457 results per frame an interrupt per batch is the only sane
+    granularity anyway.
+
+5.6 HARDWARE/SOFTWARE INTERFACE
+
+    The three rules from Lecture 5 shape this interface:
+
+      Rule 1 -- do not expect end users to change their code.
+      Rule 2 -- if software must change, confine the change to the runtime.
+      Rule 3 -- if the hardware cannot do it, run it on the CPU.
+
+    Concretely, the ONLY software change is inside Sphere.intersectionTime and
+    the loop that calls it. No user-visible API changes; the renderer, the Scene
+    class and the surfaces are untouched. A CPython C extension exposes:
+
+        rsiu_set_ray(px, py, pz, vx, vy, vz)   -> writes 6 BAR registers
+        rsiu_test(sphere_array, n) -> (hit[], t[])  DMA + doorbell + poll
+        rsiu_available()                        -> capability query
+
+    and Scene.rayColour becomes:
+
+        if _rsiu.available() and len(self.objects) >= RSIU_MIN_BATCH:
+            _rsiu.set_ray(ray)
+            hits, ts = _rsiu.test(self._sphere_soa)      # hardware path
+        else:
+            ...existing pure-Python loop...              # Rule 3 fallback
+
+    The fallback is not decoration. It is required for correctness whenever the
+    scene contains object types the RSIU does not implement (the Halfspace
+    ground plane, 25,501 tests per frame, has an entirely different and much
+    cheaper intersection test and is deliberately left on the CPU), and whenever
+    coordinates fall outside the Q16.16 range.
+
+    One necessary software change is a data-layout change: the scene's list of
+    Sphere objects must be kept as a struct-of-arrays (a contiguous buffer of
+    centre/radius quads) so it can be DMA'd directly. This is prepared once when
+    the scene is built, not per ray, so it costs nothing in the inner loop.
+
+5.7 VERIFICATION
+
+    The design was simulated with Icarus Verilog 11.0 against operands taken
+    from the benchmark's REAL scene -- the same camera and the same spheres that
+    bench_raytrace() constructs -- with expected results computed in double
+    precision by hw/tb/gen_vectors.py.
+
+        spheres issued      : 9 (on 9 consecutive cycles)
+        results received    : 9, in order
+        pipeline latency    : 30 cycles
+        worst |error|       : 59 LSB (9.0e-04)
+        RESULT: PASS -- 9/9 correct, full throughput
+
+    Coverage includes hits, misses, and a negative-t case (camera inside a
+    sphere). The throughput claim is verified, not assumed: nine spheres issued
+    on nine consecutive cycles produced nine in-order results.
+
+5.8 PRECISION ANALYSIS (an honest account)
+
+    Q16.16 quantisation of the operands alone costs at most 7.6e-6, which is
+    under one LSB. But the measured hardware error on the first sphere was 59
+    LSB (9.0e-4) -- far larger. The reason is instructive.
+
+        disc = r*r - (cp.cp - v*v),  with cp.cp = 402.44 and v*v = 400.02
+
+    Two large, nearly equal numbers are subtracted to leave 1.58. This is a
+    catastrophic cancellation, and it amplifies any pre-existing error in v by
+    roughly 2v/disc, about 25x here. The dominant contributor is the input
+    quantisation of the ray DIRECTION: vz = -0.99287684 carries ~0.25 LSB of
+    quantisation error, multiplied by cz = -20 gives ~5 LSB in v, which the
+    cancellation turns into ~50 LSB in t.
+
+    Two pieces of evidence confirm this diagnosis rather than merely asserting
+    it. First, an earlier revision that rounded v to Q16.16 BEFORE squaring it
+    measured 67 LSB; keeping the dot products at full Q32.32 through the
+    cancellation reduced that to 59 LSB, so internal truncation was real but
+    minor. Second, the other hit in the test set -- sphere 8, where the camera
+    is inside the sphere and no cancellation occurs -- is accurate to 1 LSB.
+
+    Is 9.0e-4 acceptable? Yes. It is a relative error of 4.8e-5 on t = 18.74,
+    and t is used to select the nearest object and to compute a surface point
+    that is ultimately quantised to one of 256 colour levels per channel. The
+    error is orders of magnitude below the visible threshold.
+
+    The clean improvement, and the obvious next revision: a ray direction is a
+    UNIT vector, so its components can never exceed 1. Q16.16 spends 15 integer
+    bits on a quantity bounded by 1. Storing directions as Q2.30 instead would
+    buy 14 additional fractional bits and cut this error by about four orders of
+    magnitude, at zero extra register width -- a per-operand format chosen from
+    the operand's known range.
+
+5.9 EXPECTED PERFORMANCE, AND ITS LIMIT
+
+    Hardware time. 179,457 sphere tests per frame at one per cycle, plus 15,333
+    ray loads, is 194,790 cycles = 0.97 ms at 200 MHz.
+
+    Software time replaced. intersectionTime is 28.1 % of the optimized 719 ms,
+    i.e. roughly 202 ms.
+
+    Data movement. Per frame the host sends 15,333 rays x 24 B = 0.37 MB and,
+    with a struct-of-arrays scene resident on the card, streams sphere indices
+    rather than sphere data; results return 179,457 x 8 B = 1.4 MB. Under 2 MB
+    per frame against a PCIe gen3 x8 link at ~8 GB/s is about 0.25 ms, and it
+    overlaps with computation.
+
+    So the accelerated portion collapses from ~202 ms to ~1-2 ms. But that is
+    NOT the speedup, because of Amdahl:
+
+        S_max = 1 / (1 - 0.281) = 1.39x
+
+    Even an infinitely fast RSIU cannot exceed 1.39x on this benchmark, and a
+    realistic estimate including driver and DMA overhead is 1.35-1.38x. Combined
+    with the software optimization the end-to-end figure would be about 4.1x
+    versus the original baseline.
+
+    Two honest caveats. First, cProfile inflates functions that are called very
+    often, and intersectionTime is called 179,457 times, so 28.1 % is likely an
+    over-estimate of its true share -- which makes 1.39x an optimistic bound.
+    Second, this is a projection from measured counts and a simulated design,
+    not a measured end-to-end result; we did not build the card.
+
+    The design consequence is worth stating plainly, because it runs against the
+    instinct to build something impressive. Since one pipeline already reduces
+    the accelerated portion to about 1 % of frame time, WIDENING the accelerator
+    would be pointless. A 9-wide array (one unit per scene object, testing a ray
+    against all objects simultaneously) would cut 0.97 ms to 0.077 ms and change
+    the end-to-end result by well under 1 %. The bottleneck after offload is
+    Amdahl and the surviving Python, not the arithmetic. Lecture 1's argument
+    applies directly: verification is the limiting cost in hardware, so the
+    correct design is the smallest one that removes the bottleneck.
+
+    To go beyond 1.39x, the right move is not more multipliers but a LARGER
+    offload -- moving the whole traversal loop (rayColour's object loop at
+    10.1 %, _lightIsVisible at 6.2 %, and the Halfspace test at 2.3 %) into the
+    same unit, raising the offloadable fraction to ~46.7 % and the bound to
+    1.88x. That is a data-movement argument, not an arithmetic one, and it
+    matches Lecture 1's axiom that moving data to the processor is the expensive
+    part.
+
+5.10 PERFORMANCE / AREA / POWER TRADE-OFFS
+
+    Area. The dominant cost is arithmetic: 9 signed 32x32 multipliers (8 in S2
+    plus the squaring of v), roughly 9 DSP48 blocks on a Xilinx-class FPGA, and
+    24 square-root stages each holding a 48-bit radicand, a 24-bit root and a
+    26-bit remainder -- about 2,400 flip-flops for the sqrt plus roughly 1,500
+    for the datapath and delay lines, plus two 32-deep FIFOs. This is a small
+    unit, well under 1 % of a mid-range FPGA.
+
+    The single most expensive decision is the full-width squaring of v needed to
+    survive the cancellation (section 5.8): it turns one 32x32 multiply into a
+    64x64, which is 4x the multiplier area of the others. Adopting Q2.30 ray
+    directions would let that revert to 32x32 AND improve accuracy -- a case
+    where the better numerical choice is also the cheaper one.
+
+    Performance vs frequency. Throughput is one sphere per cycle regardless of
+    depth, so frequency scales throughput linearly. Latency is fixed at 30
+    cycles; at 200 MHz that is 150 ns, utterly hidden by the 32-deep FIFO and
+    the batch size of 179,457. There is no reason to pipeline deeper for
+    latency, and no benefit to reducing depth.
+
+    Power. The unit has no caches, no branch predictor and no register file --
+    the three biggest consumers in a general-purpose core. Every flip-flop
+    toggles in service of the computation. Against a Haswell core retiring
+    53 billion instructions to do the same geometry, the energy per intersection
+    is lower by orders of magnitude. But the honest framing is that at 1 % of
+    frame time the accelerator's own power is irrelevant; what matters is that
+    the CPU is freed.
+
+    Fixed vs floating point. FP32 would remove the range and cancellation
+    concerns and match the Python semantics exactly, at the cost of a
+    significantly larger multiplier, an FP adder with normalisation, and a much
+    more complex square root. For a bounded scene the fixed-point unit is the
+    better engineering choice, and section 5.8 quantifies exactly what it costs.
+
+
+================================================================================
+ 6. CONCLUSION
+================================================================================
+
+    Software. The benchmark was 2.98x faster (66.6 %) with byte-identical
+    output, achieved entirely by removing overhead rather than changing the
+    algorithm: the same 204,958 intersection tests are performed. The counters
+    confirm the mechanism -- cycles down 2.88x, instructions down 2.71x, IPC
+    essentially flat, page faults identical to the fault. The single most
+    striking finding is that 3.7 % of the original runtime was spent in
+    mustBeVector, a function whose entire body is `return self`, called 520,539
+    times per frame to assert a type that Python already knew.
+
+    Hardware. Optimizing did not merely make the program faster, it changed the
+    shape of the problem: intersectionTime went from 11.8 % to 28.1 % of
+    runtime, and interpreter dispatch rose from 28.11 % to 34.10 % of samples.
+    Once the removable software overhead is gone, what remains is irreducible in
+    software, and that is where hardware earns its place. The RSIU targets
+    exactly that residue: a small, control-free, ray-stationary pipeline that
+    retires one sphere per cycle, verified in simulation against the benchmark's
+    own scene with a fully quantified 9.0e-4 worst-case error.
+
+    The most useful result may be the negative one. The accelerator makes the
+    geometry essentially free (202 ms -> ~1 ms), yet Amdahl caps the end-to-end
+    gain at 1.39x, and building a wider unit would change nothing. The lesson --
+    that the value of an accelerator is set by the fraction of the workload you
+    can move to it, not by how fast you can make the part you moved -- is the
+    central argument of the course, and this benchmark demonstrates it
+    numerically.
+
+================================================================================
+ Artifacts: benchmarks/{original,optimized}/bm_raytrace/run_benchmark.py
+            results/raytrace_{base,opt}_flame.svg      flame graphs
+            results/raytrace_{base,opt}_stat.txt       perf stat
+            results/raytrace_{base,opt}_ipc.txt        cycles / instructions
+            results/raytrace_compare.txt               pyperf compare_to
+            results/cprofile_{original,optimized}.txt  Python attribution
+            results/hw_sim.txt                         RTL simulation log
+            hw/rtl/*.v, hw/tb/*                        accelerator + testbench
+ Reproduce: bash scripts/run_experiment.sh   and   bash scripts/run_hw_sim.sh
+================================================================================
