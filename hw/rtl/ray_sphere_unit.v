@@ -28,9 +28,10 @@
 //
 // NUMERIC FORMAT -- Q16.16 signed fixed point (32-bit): range +/-32768 with a
 // resolution of 2^-16 = 1.5e-5. The benchmark's scene fits in +/-16 units, so
-// this leaves a very large margin. Products are kept at full 64-bit width
-// (Q32.32) and only narrowed after the adder trees, so no intermediate rounds
-// away. See hw/README.md for the precision trade-off discussion.
+// this leaves a very large margin. Products are kept at full 64-bit Q32.32
+// width all the way through the discriminant subtraction -- which is a
+// catastrophic cancellation -- and are only narrowed to Q16.16 afterwards,
+// with round-to-nearest. See hw/README.md for the precision analysis.
 // ===========================================================================
 `timescale 1ns / 1ps
 `default_nettype none
@@ -143,6 +144,14 @@ module ray_sphere_unit #(
     reg signed [AW-1:0] s3_cpcp;    // cpcp = cp . cp
     reg signed [AW-1:0] s3_rr;
 
+    // NOTE: the dot products are deliberately NOT narrowed back to Q16.16 here.
+    // The next stage computes disc = r*r - (cp.cp - v*v), and for a ray that
+    // grazes a sphere cp.cp and v*v are large and nearly equal (402.44 and
+    // 400.02 for the benchmark's first sphere) while their difference is small.
+    // That catastrophic cancellation amplifies any error in v by roughly
+    // 2*v/disc -- about 25x here -- so rounding v to Q16.16 before squaring it
+    // turned a 1 LSB truncation into a 67 LSB error in t. Keeping the full
+    // Q32.32 product through the cancellation costs only register width.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3_vld <= 1'b0; s3_id <= 0;
@@ -150,17 +159,25 @@ module ray_sphere_unit #(
         end else begin
             s3_vld  <= s2_vld;
             s3_id   <= s2_id;
-            s3_v    <= (s2_pv0 + s2_pv1 + s2_pv2) >>> FRAC;
-            s3_cpcp <= (s2_pc0 + s2_pc1 + s2_pc2) >>> FRAC;
-            s3_rr   <= s2_rr >>> FRAC;
+            s3_v    <= s2_pv0 + s2_pv1 + s2_pv2;   // Q32.32
+            s3_cpcp <= s2_pc0 + s2_pc1 + s2_pc2;   // Q32.32
+            s3_rr   <= s2_rr;                      // Q32.32
         end
     end
 
     // =======================================================================
     // S4 -- disc = r*r - (cp.cp - v*v)   and the hit test
+    // All three terms stay in Q32.32, so the subtraction loses no precision.
     // =======================================================================
-    wire signed [AW-1:0] vv_full = (s3_v * s3_v) >>> FRAC;
-    wire signed [AW-1:0] disc_c  = s3_rr - (s3_cpcp - vv_full);
+    wire signed [2*AW-1:0] vv_wide = s3_v * s3_v;              // Q64.64
+    wire signed [AW-1:0]   vv_full = vv_wide >>> (2*FRAC);     // -> Q32.32
+    wire signed [AW-1:0]   disc_c  = s3_rr - (s3_cpcp - vv_full);
+
+    // Round-to-nearest when narrowing Q32.32 -> Q16.16 (one adder, halves the
+    // truncation bias compared with a plain arithmetic shift).
+    localparam signed [AW-1:0] RND = (1 << (FRAC-1));
+    wire signed [AW-1:0] disc_q16 = (disc_c + RND) >>> FRAC;
+    wire signed [AW-1:0] v_q16    = (s3_v  + RND) >>> FRAC;
 
     reg                  s4_vld;
     reg [IDW-1:0]        s4_id;
@@ -172,7 +189,7 @@ module ray_sphere_unit #(
     // The widening to 2*SQRT_W is written out explicitly rather than relying on
     // Verilog's context-determined operand width for "<<", so the top FRAC bits
     // cannot be shifted away by a tool that sizes the shift differently.
-    wire [AW-1:0]       disc_u     = disc_c[AW-1] ? {AW{1'b0}} : disc_c;
+    wire [AW-1:0]       disc_u     = disc_q16[AW-1] ? {AW{1'b0}} : disc_q16;
     wire [2*SQRT_W-1:0] radicand_w =
              {{(2*SQRT_W-DW){1'b0}}, disc_u[DW-1:0]} << FRAC;
 
@@ -184,7 +201,7 @@ module ray_sphere_unit #(
             s4_vld      <= s3_vld;
             s4_id       <= s3_id;
             s4_hit      <= ~disc_c[AW-1];               // disc >= 0
-            s4_v        <= s3_v[DW-1:0];
+            s4_v        <= v_q16[DW-1:0];
             s4_radicand <= radicand_w;
         end
     end
