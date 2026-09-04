@@ -98,6 +98,11 @@ for B in raytrace pyflate; do
         SRC="$ROOT/benchmarks/$V/bm_$B"
 
         echo "-- pyperf statistics"
+        # pyperf refuses to overwrite an existing result file. Without this the
+        # step is skipped on a re-run and compare_to silently reports the
+        # PREVIOUS run's numbers -- which would be stale the moment we change
+        # an optimization.
+        rm -f "$OUT/${B}_${TAG}.json"
         ( cd "$SRC" && $PY run_benchmark.py -o "$OUT/${B}_${TAG}.json" ) 2>&1 | tail -4
 
         echo "-- perf stat"
