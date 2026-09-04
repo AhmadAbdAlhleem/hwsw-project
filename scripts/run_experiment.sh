@@ -107,8 +107,22 @@ for B in raytrace pyflate; do
                $PY "$ROOT/scripts/profile_driver.py" "$B" "$LOOPS" "$V" >/dev/null 2>&1
         sed -n '1,40p' "$OUT/${B}_${TAG}_stat.txt"
 
-        echo "-- perf record (-F 999 -g) + flame graph"
-        perf record -F 999 -g -q -o "$OUT/${B}_${TAG}.perf.data" \
+        echo "-- perf stat: cycles/instructions only (for IPC)"
+        # The guest vPMU exposes only 4 generic counters. Asking for six hardware
+        # events at once multiplexes them and reports cycles as 0, making IPC
+        # uncomputable, so IPC gets its own two-event run where nothing
+        # multiplexes.
+        perf stat -e cycles,instructions -o "$OUT/${B}_${TAG}_ipc.txt" \
+            $PY "$ROOT/scripts/profile_driver.py" "$B" "$LOOPS" "$V" >/dev/null 2>&1
+        grep -E "cycles|instructions|insn per cycle|elapsed" "$OUT/${B}_${TAG}_ipc.txt" || true
+
+        echo "-- perf record (-e cpu-clock -F 999 -g) + flame graph"
+        # perf's default sampling event is cycles:ppp, a PRECISE (PEBS) event.
+        # PEBS is not virtualised in this KVM guest, so it captures almost no
+        # samples and the profile comes out empty. cpu-clock is a software,
+        # time-based event: always available in a guest, and time is exactly
+        # what a flame graph measures.
+        perf record -e cpu-clock -F 999 -g -q -o "$OUT/${B}_${TAG}.perf.data" \
             $PY "$ROOT/scripts/profile_driver.py" "$B" "$LOOPS" "$V" >/dev/null 2>&1
         perf report -i "$OUT/${B}_${TAG}.perf.data" --stdio 2>/dev/null \
             | head -60 > "$OUT/${B}_${TAG}_report.txt"
