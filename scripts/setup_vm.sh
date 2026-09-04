@@ -92,4 +92,4 @@ else
 fi
 
 say "Setup complete."
-echo "Next:  bash scripts/run_baseline.sh"
+echo "Next:  bash scripts/run_experiment.sh"
