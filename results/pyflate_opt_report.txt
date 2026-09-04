@@ -1,0 +1,60 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 11K of event 'cpu-clock'
+# Event count (approx.): 11105105094
+#
+# Children      Self  Command      Shared Object                              Symbol                                          
+# ........  ........  ...........  .........................................  ................................................
+#
+    23.97%    23.97%  python3-dbg  python3.10d                                [.] _PyEval_EvalFrameDefault
+            |          
+            |--0.74%--0xfdfdfdfdfdfdfd00
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.73%--0
+            |          _PyEval_EvalFrameDefault
+            |          
+             --0.72%--0xfdfdfdfdfd000053
+                       _PyEval_EvalFrameDefault
+
+    15.24%     0.00%  python3-dbg  [unknown]                                  [.] 0x00000000009af720
+            |
+            ---0x9af720
+               |          
+               |--1.40%--binary_op1
+               |          
+               |--0.80%--get_small_int.lto_priv.0
+               |          
+               |--0.78%--pthread_getspecific@@GLIBC_2.34
+               |          
+               |--0.69%--PyGILState_Check
+               |          
+               |--0.69%--long_bitwise
+               |          
+               |--0.69%--long_richcompare.lto_priv.0
+               |          
+                --0.52%--PyLong_FromLong
+
+     6.41%     0.00%  python3-dbg  [unknown]                                  [.] 0x4677615267756265
+            |
+            ---0x4677615267756265
+               |          
+               |--4.66%--_PyMem_DebugCheckAddress
+               |          
+                --1.75%--read_size_t
+
+     5.02%     5.02%  python3-dbg  python3.10d                                [.] _PyMem_DebugCheckAddress
+            |          
+             --4.66%--0x4677615267756265
+                       _PyMem_DebugCheckAddress
+
+     4.77%     0.00%  python3-dbg  [unknown]                                  [.] 0xdddddddddddddddd
+            |
+            ---0xdddddddddddddddd
+               |          
+               |--1.58%--__memset_avx2_unaligned_erms
+               |          
+               |--1.01%--0xdddddddddddddddd

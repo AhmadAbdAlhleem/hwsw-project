@@ -1,0 +1,20 @@
+============================================================
+  RSIU testbench -- real raytrace scene, Q16.16 datapath
+============================================================
+  [ ok ] sphere 0: HIT  t=18.744263 (ref 18.743362, err 59 LSB)
+  [ ok ] sphere 1: MISS
+  [ ok ] sphere 2: MISS
+  [ ok ] sphere 3: MISS
+  [ ok ] sphere 4: MISS
+  [ ok ] sphere 5: MISS
+  [ ok ] sphere 6: MISS
+  [ ok ] sphere 7: MISS
+  [ ok ] sphere 8: HIT  t=-2.004745 (ref -2.004761, err 1 LSB)
+------------------------------------------------------------
+  spheres issued      : 9 (on 9 consecutive cycles)
+  results received    : 9
+  pipeline latency    : 30 cycles
+  worst |error|       : 59 LSB (9.002686e-04)
+------------------------------------------------------------
+  RESULT: PASS -- 9/9 spheres correct, full throughput
+============================================================

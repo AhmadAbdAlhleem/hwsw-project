@@ -1,0 +1,21 @@
+# started on Fri Sep  4 18:29:44 2026
+
+
+ Performance counter stats for 'python3-dbg /root/hwsw/scripts/profile_driver.py raytrace 5 optimized':
+
+           3787.04 msec task-clock                #    0.998 CPUs utilized          
+                 0      cycles                    #    0.000 GHz                    
+       19705597726      instructions                                                
+        4710765225      branches                  #    1.244 G/sec                  
+          34595742      branch-misses             #    0.73% of all branches        
+          15287600      cache-references          #    4.037 M/sec                  
+            158894      cache-misses              #    1.039 % of all cache refs    
+              3391      page-faults               #  895.422 /sec                   
+                 4      context-switches          #    1.056 /sec                   
+
+       3.793950667 seconds time elapsed
+
+       3.769807000 seconds user
+       0.024011000 seconds sys
+
+

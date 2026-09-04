@@ -1,0 +1,14 @@
+# started on Fri Sep  4 18:29:47 2026
+
+
+ Performance counter stats for 'python3-dbg /root/hwsw/scripts/profile_driver.py raytrace 5 optimized':
+
+        9021903933      cycles                                                      
+       19704141695      instructions              #    2.18  insn per cycle         
+
+       3.792816729 seconds time elapsed
+
+       3.776752000 seconds user
+       0.016003000 seconds sys
+
+

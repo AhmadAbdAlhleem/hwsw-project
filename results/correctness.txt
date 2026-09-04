@@ -1,0 +1,15 @@
+==============================================================
+  Correctness verification: optimized vs original
+==============================================================
+raytrace: rendering with both variants ...
+   original   sha256=520b45b95e22ba0c8239e8725f960418
+   optimized  sha256=520b45b95e22ba0c8239e8725f960418
+   -> images are BYTE-IDENTICAL
+pyflate: decompressing with both variants ...
+   original   md5 checksum OK
+   optimized  md5 checksum OK
+   -> decompressed output matches the reference digest
+--------------------------------------------------------------
+  raytrace   PASS
+  pyflate    PASS
+==============================================================

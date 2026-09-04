@@ -23,3 +23,6 @@ pyperformance/
 # --- os ---
 Thumbs.db
 .DS_Store
+
+# compiled simulation binary (rebuilt by scripts/run_hw_sim.sh)
+results/rsiu_tb

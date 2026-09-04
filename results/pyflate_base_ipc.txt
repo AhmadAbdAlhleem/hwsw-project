@@ -1,0 +1,14 @@
+# started on Fri Sep  4 18:30:12 2026
+
+
+ Performance counter stats for 'python3-dbg /root/hwsw/scripts/profile_driver.py pyflate 5 original':
+
+       37915234463      cycles                                                      
+       83558857931      instructions              #    2.20  insn per cycle         
+
+      15.925603177 seconds time elapsed
+
+      15.808823000 seconds user
+       0.115979000 seconds sys
+
+

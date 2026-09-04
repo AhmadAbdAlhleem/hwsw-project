@@ -1,0 +1,60 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 11K of event 'cpu-clock'
+# Event count (approx.): 11047047036
+#
+# Children      Self  Command      Shared Object         Symbol                                               
+# ........  ........  ...........  ....................  .....................................................
+#
+    28.11%    28.10%  python3-dbg  python3.10d           [.] _PyEval_EvalFrameDefault
+            |          
+            |--2.13%--0
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--1.13%--0xfdfdfdfdfd000053
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.76%--0x26a017c026a007c
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.67%--0xfdfdfdfdfdfdfd00
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.67%--0xddfdfdfdfdfdfdfd
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.63%--0x36a017c036a007c
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.53%--0x14026a017c026a
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.53%--0xfdfdfd
+            |          _PyEval_EvalFrameDefault
+            |          
+            |--0.51%--0x7c00170014026a
+            |          _PyEval_EvalFrameDefault
+            |          
+             --0.51%--0xfd
+                       _PyEval_EvalFrameDefault
+
+     6.82%     0.00%  python3-dbg  [unknown]             [.] 0000000000000000
+            |
+            ---0
+               |          
+               |--2.13%--_PyEval_EvalFrameDefault
+               |          
+               |--1.22%--_PyEval_Vector
+               |          
+               |--1.01%--_PyEval_MakeFrameVector
+               |          
+               |--0.61%--is_tstate_valid.lto_priv.0
+               |          
+               |--0.56%--frame_dealloc.lto_priv.0
+               |          
+                --0.56%--0xdddddddddddddddd
+                          |          
+                           --0.53%--0xdddddddddddddddd

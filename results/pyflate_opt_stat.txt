@@ -1,0 +1,21 @@
+# started on Fri Sep  4 18:30:45 2026
+
+
+ Performance counter stats for 'python3-dbg /root/hwsw/scripts/profile_driver.py pyflate 5 optimized':
+
+          11166.85 msec task-clock                #    0.999 CPUs utilized          
+                 0      cycles                    #    0.000 GHz                    
+       59628815099      instructions                                                
+       14534674014      branches                  #    1.302 G/sec                  
+          59017443      branch-misses             #    0.41% of all branches        
+          26487664      cache-references          #    2.372 M/sec                  
+           3256980      cache-misses              #   12.296 % of all cache refs    
+             44930      page-faults               #    4.024 K/sec                  
+                18      context-switches          #    1.612 /sec                   
+
+      11.178676884 seconds time elapsed
+
+      11.085757000 seconds user
+       0.092049000 seconds sys
+
+

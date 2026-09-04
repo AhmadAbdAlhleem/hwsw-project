@@ -1,0 +1,44 @@
+==========================================================================
+  cProfile: raytrace / original   (1 loop(s), 2.002 s under the profiler)
+==========================================================================
+  tottime   share    calls     function
+  ----------------------------------------------------------------------
+  0.336     16.8%    509871    dot (run_benchmark.py:51)
+  0.290     14.5%    277865    __sub__ (run_benchmark.py:113)
+  0.236     11.8%    179457    intersectionTime (run_benchmark.py:142)
+  0.174     8.7%     452943    __init__ (run_benchmark.py:24)
+  0.124     6.2%     10666     _lightIsVisible (run_benchmark.py:283)
+  0.101     5.1%     149743    scale (run_benchmark.py:48)
+  0.085     4.2%     109887    normalized (run_benchmark.py:61)
+  0.075     3.8%     109887    magnitude (run_benchmark.py:35)
+  0.074     3.7%     520539    mustBeVector (run_benchmark.py:76)
+  0.066     3.3%     15265     <listcomp> (run_benchmark.py:271)
+  0.061     3.1%     98172     __init__ (run_benchmark.py:177)
+  0.050     2.5%     5333      colourAt (run_benchmark.py:315)
+
+  NOTE: cProfile adds per-call overhead, so it exaggerates the cost of
+  functions called very often. Use these SHARES to rank hotspots, and the
+  pyperf timings for absolute performance.
+
+==========================================================================
+  cProfile: pyflate / original   (1 loop(s), 2.177 s under the profiler)
+==========================================================================
+  tottime   share    calls     function
+  ----------------------------------------------------------------------
+  0.490     22.5%    1         decode_huffman_block (run_benchmark.py:394)
+  0.336     15.4%    148271    find_next_symbol (run_benchmark.py:224)
+  0.225     10.3%    341601    snoopbits (run_benchmark.py:112)
+  0.213     9.8%     92803     move_to_front (run_benchmark.py:288)
+  0.196     9.0%     156708    readbits (run_benchmark.py:117)
+  0.129     5.9%     655017    _mask (run_benchmark.py:54)
+  0.111     5.1%     1         bwt_reverse (run_benchmark.py:306)
+  0.076     3.5%     1         bwt_transform (run_benchmark.py:292)
+  0.076     3.5%     766811    <method 'append' of 'list' objects>
+  0.072     3.3%     67562     _more (run_benchmark.py:106)
+  0.068     3.1%     674570    <built-in method builtins.len>
+  0.056     2.6%     67562     _read (run_benchmark.py:43)
+
+  NOTE: cProfile adds per-call overhead, so it exaggerates the cost of
+  functions called very often. Use these SHARES to rank hotspots, and the
+  pyperf timings for absolute performance.
+

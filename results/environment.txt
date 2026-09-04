@@ -1,0 +1,7 @@
+date   : Fri Sep  4 18:29:00 UTC 2026
+kernel : 5.15.0-1080-kvm
+python : Python 3.10.12 (main, Jul 15 2026, 23:40:17) [GCC 11.4.0]
+perf   : perf version 5.15.179
+cores  : 8
+model name	: Intel(R) Xeon(R) CPU E5-2630 v3 @ 2.40GHz
+note   : measurements taken inside QEMU/KVM guest
