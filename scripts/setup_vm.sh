@@ -20,11 +20,11 @@ uname -a
 echo "cores  : $(nproc)"
 grep -m1 'model name' /proc/cpuinfo || true
 
-say "1. Disk space (we need roughly 1.5-2 GB free)"
+say "1. Disk space (need ~2.5 GB: python3-dbg pulls in gcc/g++/gdb/build-essential)"
 df -h /
 FREE_MB=$(df -Pm / | awk 'NR==2 {print $4}')
 echo "free: ${FREE_MB} MB"
-if [ "$FREE_MB" -lt 900 ]; then
+if [ "$FREE_MB" -lt 2500 ]; then
     bad "Not enough free space. Fix this BEFORE installing, or apt will fail half-way."
     echo "   To grow the disk:"
     echo "     1) shut the guest down:   poweroff"
@@ -41,6 +41,7 @@ ok "disk space sufficient"
 say "2. Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+apt-get -y -qq --fix-broken install 2>/dev/null || true
 apt-get install -y -qq python3-dbg python3-pip python3-venv linux-tools-common \
     "linux-tools-$(uname -r)" 2>/dev/null \
     || apt-get install -y -qq python3-dbg python3-pip python3-venv linux-tools-common linux-tools-generic
@@ -76,7 +77,18 @@ say "6. Flame graph support"
 if perf script report flamegraph --help >/dev/null 2>&1; then
     ok "perf's built-in flamegraph generator is available"
 else
-    bad "built-in flamegraph missing -- we fall back to perf report --stdio"
+    bad "perf has no built-in flamegraph generator on this kernel's linux-tools"
+    echo "   Falling back to Brendan Gregg's FlameGraph scripts (the ones Lecture 4 credits)."
+    if [ ! -x /opt/FlameGraph/flamegraph.pl ]; then
+        mkdir -p /opt/FlameGraph
+        BASE=https://raw.githubusercontent.com/brendangregg/FlameGraph/master
+        ( cd /opt/FlameGraph           && wget -q "$BASE/stackcollapse-perf.pl" "$BASE/flamegraph.pl"           && chmod +x ./*.pl )
+    fi
+    if [ -x /opt/FlameGraph/flamegraph.pl ]; then
+        ok "FlameGraph scripts installed in /opt/FlameGraph"
+    else
+        bad "could not fetch FlameGraph scripts -- check guest network"
+    fi
 fi
 
 say "Setup complete."
