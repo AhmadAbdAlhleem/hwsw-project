@@ -168,8 +168,13 @@ module ray_sphere_unit #(
     reg signed [DW-1:0]  s4_v;
     reg [2*SQRT_W-1:0]   s4_radicand;
 
-    // Q16.16 sqrt via integer sqrt of (value << FRAC): sqrt(v) = isqrt(v*2^16)
-    wire [AW-1:0] disc_u = disc_c[AW-1] ? {AW{1'b0}} : disc_c;
+    // Q16.16 sqrt via integer sqrt of (value << FRAC): sqrt(v) = isqrt(v*2^16).
+    // The widening to 2*SQRT_W is written out explicitly rather than relying on
+    // Verilog's context-determined operand width for "<<", so the top FRAC bits
+    // cannot be shifted away by a tool that sizes the shift differently.
+    wire [AW-1:0]       disc_u     = disc_c[AW-1] ? {AW{1'b0}} : disc_c;
+    wire [2*SQRT_W-1:0] radicand_w =
+             {{(2*SQRT_W-DW){1'b0}}, disc_u[DW-1:0]} << FRAC;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -180,7 +185,7 @@ module ray_sphere_unit #(
             s4_id       <= s3_id;
             s4_hit      <= ~disc_c[AW-1];               // disc >= 0
             s4_v        <= s3_v[DW-1:0];
-            s4_radicand <= disc_u[2*SQRT_W-FRAC-1:0] << FRAC;
+            s4_radicand <= radicand_w;
         end
     end
 
