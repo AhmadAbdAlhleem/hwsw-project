@@ -15,11 +15,11 @@ pyperf : 2.10.0
 
 | Benchmark | Original | Optimized | Speedup | Improvement |
 |---|---|---|---|---|
-| raytrace | 2.15 s ± 0.02 s | 718 ms ± 4 ms | **2.99x faster** | **66.6 %** |
-| pyflate  | 3.14 s ± 0.02 s | 2.59 s ± 0.02 s | **1.21x faster** | **17.5 %** |
+| raytrace | 2.15 s ± 0.02 s | 719 ms ± 9 ms | **2.98x faster** | **66.6 %** |
+| pyflate  | 3.12 s ± 0.02 s | 2.18 s ± 0.02 s | **1.44x faster** | **30.1 %** |
 
-Both clear the project's >= 7 % bar. Standard deviations are ~1 % of the mean, so
-both differences are far outside measurement noise.
+Both clear the project's >= 7 % bar by a wide margin. Standard deviations are
+~1 % of the mean, so both differences are far outside measurement noise.
 
 ## Correctness (checked before any performance number was recorded)
 
@@ -30,68 +30,87 @@ both differences are far outside measurement noise.
 
 ## Hardware counters
 
-Measured with `perf stat -e cycles,instructions` **alone**. The guest vPMU
-exposes only 4 generic counters, so requesting six hardware events at once
-multiplexed them and reported `cycles` as 0; restricting the run to two events
-removes the multiplexing.
+`cycles` and `instructions` come from a dedicated two-event `perf stat` run; see
+"threats to validity" below for why they cannot be read from the nine-event run.
 
-| Metric | raytrace orig | raytrace opt | ratio | pyflate orig | pyflate opt | ratio |
-|---|---|---|---|---|---|---|
-| Cycles | 26.67 B | 9.07 B | **2.94x fewer** | 37.94 B | 31.35 B | **1.21x fewer** |
-| Instructions | 55.18 B | 19.88 B | **2.78x fewer** | 83.41 B | 68.76 B | **1.21x fewer** |
-| IPC | 2.07 | 2.19 | +5.8 % | 2.20 | 2.19 | flat |
-| Elapsed (5 loops) | 11.22 s | 3.82 s | 2.94x | 15.95 s | 13.17 s | 1.21x |
+### raytrace
 
-Secondary counters (from the nine-event run; hardware events there are
-multiplexed and therefore approximate, software events are exact):
+| Metric | Original | Optimized | Change |
+|---|---|---|---|
+| Elapsed (5 loops) | 10.85 s | 3.79 s | **2.86x faster** |
+| Task-clock | 10 846 ms | 3 787 ms | 2.86x less |
+| Cycles | 25.98 B | 9.02 B | **2.88x fewer** |
+| Instructions | 53.33 B | 19.71 B | **2.71x fewer** |
+| IPC | 2.07 | 2.18 | +5.3 % |
+| Branches | 12.93 B | 4.71 B | 2.74x fewer |
+| Branch-miss rate | 0.89 % | 0.73 % | lower |
+| Cache references | 38.0 M | 15.3 M | 2.49x fewer |
+| Cache misses (abs) | 171 475 | 158 894 | slightly fewer |
+| Cache-miss rate | 0.45 % | 1.04 % | *higher* (see below) |
+| Page faults | 3 391 | 3 391 | **identical** |
+| Context switches | 10 | 4 | negligible either way |
 
-| Metric | raytrace orig | raytrace opt | pyflate orig | pyflate opt |
-|---|---|---|---|---|
-| Task-clock | 10 856 ms | 3 793 ms | 16 143 ms | 13 262 ms |
-| Branches | 12.92 B | 4.71 B | 20.74 B | 16.81 B |
-| Branch-miss rate | 0.89 % | 0.73 % | 0.48 % | 0.45 % |
-| Cache references | 35.9 M | 14.2 M | 47.5 M | 41.3 M |
-| Cache-miss rate | 0.55 % | 1.16 % | 6.78 % | 7.89 % |
-| Page faults | 3 391 | 3 389 | 46 034 | 46 038 |
-| Context switches | 8 | 8 | 33 | 20 |
+### pyflate
+
+| Metric | Original | Optimized | Change |
+|---|---|---|---|
+| Elapsed (5 loops) | 16.13 s | 11.18 s | **1.44x faster** |
+| Task-clock | 16 124 ms | 11 167 ms | 1.44x less |
+| Cycles | 37.92 B | 26.48 B | **1.43x fewer** |
+| Instructions | 84.21 B | 59.63 B | **1.41x fewer** |
+| IPC | 2.20 | 2.25 | +2.3 % |
+| Branches | 20.73 B | 14.53 B | 1.43x fewer |
+| Branch-miss rate | 0.48 % | 0.41 % | lower |
+| Cache references | 49.6 M | 26.5 M | **1.87x fewer** |
+| Cache misses (abs) | 3.236 M | 3.257 M | essentially unchanged |
+| Cache-miss rate | 6.53 % | 12.30 % | *higher* (see below) |
+| Page faults | 45 957 | 44 930 | ~unchanged |
+| Context switches | 23 | 18 | negligible either way |
 
 ## Reading the counters
 
-**The speedup is removed work, not better execution efficiency.** For pyflate,
-cycles and instructions both fall by exactly the same 1.21x and **IPC is flat
-(2.20 -> 2.19)**: the CPU is executing just as efficiently per cycle, it simply
-has far less to execute. For raytrace the same holds with a small bonus — IPC
-rises 2.07 -> 2.19 (+5.8 %) because `__slots__` and the removed temporaries
-shrink the object graph, so the 2.94x cycle reduction slightly outpaces the
-2.78x instruction reduction.
+**The speedup is removed work, not better execution efficiency.** In both
+benchmarks cycles and instructions fall by almost exactly the same factor
+(raytrace 2.88x / 2.71x, pyflate 1.43x / 1.41x) while IPC barely moves
+(2.07 -> 2.18 and 2.20 -> 2.25). The processor is executing about as efficiently
+per cycle as before; it simply has far less to execute. The small IPC gains are
+a secondary effect of touching less memory.
 
-**Page faults and context switches are unchanged** (3 391 vs 3 389; 46 034 vs
-46 038). Neither benchmark's memory footprint or scheduling behaviour moved, so
-the measurement is not contaminated by I/O or scheduler effects — the difference
-is pure user-space compute. This is the same invariant argument used in HW1,
-where identical instruction counts proved only the data layout had changed.
+**Page faults are unchanged** (raytrace 3 391 vs 3 391 — identical to the fault;
+pyflate 45 957 vs 44 930). Neither benchmark's memory footprint moved, so the
+measurement is not contaminated by allocation or I/O behaviour: the difference
+is pure user-space compute. This is the same style of invariant used in HW1,
+where matching instruction counts proved that only data layout had changed.
 
-**The cache-miss *rate* rises while performance improves** (raytrace 0.55 % ->
-1.16 %). This is the trap Tutorial 2 sets deliberately with its 2D-array demo: a
-ratio whose denominator collapses can move the wrong way. Absolute cache
-references fell 2.52x (35.9 M -> 14.2 M) and absolute misses also fell
-(197 020 -> 165 126); only the quotient rose. Always report absolute counts.
+**The cache-miss *rate* rises while performance improves** — raytrace 0.45 % ->
+1.04 %, pyflate 6.53 % -> 12.30 %. This is precisely the trap Tutorial 2 sets
+with its 2D-array demo, where the faster row-major version had a 9x *worse* miss
+rate. A rate is a quotient, and here the denominator collapsed: pyflate's cache
+*references* fell 1.87x (49.6 M -> 26.5 M) because removing `sorted()` and the
+256 `find()` scans eliminated a large volume of streaming reads that were nearly
+all hits. The absolute miss count barely changed (3.236 M -> 3.257 M) — those are
+the compulsory misses, which no amount of restructuring removes. Report absolute
+counts, not just rates.
 
-## Profiling notes / threats to validity
+## Threats to validity
 
 - **PEBS is not virtualized in this guest.** `perf record`'s default event is
   `cycles:ppp`, a precise event; with no PEBS it collected almost no samples
   (14 KB `perf.data`, empty reports, 579-byte flame graphs). Re-running with
-  `-e cpu-clock` — a software, time-based event, which is exactly what a flame
-  graph wants — produced real profiles (108-136 KB flame graphs).
-- **Counter multiplexing.** The vPMU has 4 generic counters. Any `perf stat`
-  requesting more than that time-shares them and extrapolates; that is why the
-  nine-event runs reported `cycles = 0`. Hardware-event values from those runs
-  are approximate.
-- **Virtualization overhead.** Everything runs in a KVM guest, where a vmexit
-  costs roughly 1000-4000 cycles and a TLB miss requires a two-dimensional page
-  walk. Both variants of each benchmark pay this equally, so the *comparison* is
+  `-e cpu-clock` — a software, time-based event, which is what a flame graph
+  measures anyway — produced real profiles (110-146 KB flame graphs).
+- **Counter multiplexing.** The guest vPMU exposes only 4 generic counters. A
+  `perf stat` requesting six hardware events time-shares them and extrapolates;
+  in our nine-event runs this reported `cycles = 0` outright. All cycle and IPC
+  figures above therefore come from a separate run requesting only two events.
+- **Virtualization overhead.** Everything runs under KVM, where a vmexit costs
+  roughly 1000-4000 cycles and a TLB miss requires a two-dimensional page walk.
+  Both variants of each benchmark pay this equally, so the *comparison* is
   sound, but the absolute times are not bare-metal numbers.
+- **`perf` cannot fully unwind CPython's stacks.** Many callers resolve to raw
+  addresses (`0xfdfdfdfdfd000053`) because the interpreter is built without
+  frame pointers. Leaf attribution (self time) is reliable; deep call-graph
+  attribution is not, so we rely on self time plus the counters.
 
 ## Where the time goes
 
@@ -99,18 +118,23 @@ references fell 2.52x (35.9 M -> 14.2 M) and absolute misses also fell
 
 | Profile | Top symbol | Self |
 |---|---|---|
-| raytrace original | `_PyEval_EvalFrameDefault` | 28.77 % |
-| raytrace optimized | `_PyEval_EvalFrameDefault` | 33.77 % |
-| pyflate original | `_PyEval_EvalFrameDefault` | 24.28 % |
-| pyflate optimized | `_PyEval_EvalFrameDefault` | 20.39 % |
+| raytrace original | `_PyEval_EvalFrameDefault` | 28.11 % |
+| raytrace optimized | `_PyEval_EvalFrameDefault` | 34.10 % |
+| pyflate original | `_PyEval_EvalFrameDefault` | 23.51 % |
+| pyflate optimized | `_PyEval_EvalFrameDefault` | 23.97 % |
 
 `_PyEval_EvalFrameDefault` is CPython's bytecode dispatch loop. That it
-dominates every profile is the central fact for the hardware-acceleration
+dominates every profile is the central fact behind the hardware-acceleration
 argument: for these workloads the machine spends most of its time *interpreting*
-rather than computing. Note it rises to 33.77 % of raytrace after optimization —
-we removed the surrounding call and allocation overhead, so what remains is a
-larger *fraction* of interpreter dispatch, even though its absolute cost fell.
+rather than computing the answer.
 
-Artifacts: `*_flame.svg` (flame graphs), `*_report.txt` (perf report),
-`*_stat.txt` (nine-event perf stat), `*_ipc.txt` (cycles/instructions),
-`*_base.json` / `*_opt.json` (raw pyperf samples), `*_compare.txt`.
+Note it *rises* to 34.10 % of raytrace after optimization. Its absolute cost fell
+with everything else; what changed is the mix. We removed the surrounding call
+and allocation overhead, so of the work that remains, a larger fraction is raw
+interpreter dispatch — the floor that software optimization cannot remove, and
+therefore exactly the part that motivates hardware.
+
+Artifacts in this directory: `*_flame.svg` (flame graphs), `*_report.txt`
+(perf report), `*_stat.txt` (nine-event perf stat), `*_ipc.txt`
+(cycles/instructions), `*_base.json` / `*_opt.json` (raw pyperf samples),
+`*_compare.txt` (compare_to tables).
