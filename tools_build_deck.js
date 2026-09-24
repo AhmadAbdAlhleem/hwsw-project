@@ -127,15 +127,15 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
     x: 10.5, y: 1.9, w: 2.15, h: 2.3, rectRadius: 0.08,
     fill: { color: "24282F" }, line: { color: "343A43", width: 1 },
   });
-  s.addText("2.98×", { x: 10.5, y: 2.1, w: 2.15, h: 0.7, isTextBox: true, margin: 0,
+  s.addText("2.56×", { x: 10.5, y: 2.1, w: 2.15, h: 0.7, isTextBox: true, margin: 0,
     fontFace: HFONT, fontSize: 34, bold: true, color: FLAME, align: "center" });
   s.addText("raytrace", { x: 10.5, y: 2.75, w: 2.15, h: 0.3, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 12, color: "9AA0A6", align: "center" });
-  s.addText("1.44×", { x: 10.5, y: 3.15, w: 2.15, h: 0.6, isTextBox: true, margin: 0,
+  s.addText("1.48×", { x: 10.5, y: 3.15, w: 2.15, h: 0.6, isTextBox: true, margin: 0,
     fontFace: HFONT, fontSize: 28, bold: true, color: TEAL, align: "center" });
   s.addText("pyflate", { x: 10.5, y: 3.72, w: 2.15, h: 0.3, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 12, color: "9AA0A6", align: "center" });
-  s.addNotes("Opening. We optimized two pyperformance benchmarks and designed a hardware accelerator for the hotspot that survived optimization. Both benchmarks beat the 7% requirement by a wide margin: raytrace 2.98x, pyflate 1.44x. The talk follows the order we actually worked in.");
+  s.addNotes("Opening. We optimized two pyperformance benchmarks and designed a hardware accelerator for the hotspot that survived optimization. Both benchmarks beat the 7% requirement by a wide margin: raytrace 2.56x, pyflate 1.48x, measured on the release interpreter. The talk follows the order we actually worked in.");
 }
 
 // ============================================================ 2 the two picks
@@ -202,7 +202,7 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
 {
   const s = lightSlide("Everything measured inside the course VM", "Measurement setup");
   card(s, M, 1.65, 5.75, 2.15);
-  body(s, "Ubuntu 22.04.5 guest, kernel 5.15.0-1080-kvm\nPython 3.10.12 debug build (python3-dbg)\nperf 5.15.179 · pyperf 2.10.0 · iverilog 11.0\nXeon E5-2630 v3 @ 2.40 GHz, 8 vCPU, QEMU/KVM",
+  body(s, "Ubuntu 22.04.5 guest, kernel 5.15.0-1080-kvm\nPython 3.10.12 — timing: release · profiling: dbg\nperf 5.15.179 · pyperf 2.10.0 · iverilog 11.0\nXeon E5-2630 v3 @ 2.40 GHz, 8 vCPU, QEMU/KVM",
     M + 0.3, 1.9, 5.15, 1.7, 12.5);
 
   card(s, 6.9, 1.65, 5.75, 2.15);
@@ -339,15 +339,15 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
 
 // ======================================================= 8 raytrace results
 {
-  const s = lightSlide("raytrace: 2.98× faster, identical output", "Benchmark 1 — results");
-  stat(s, M, 1.55, 3.0, "2.15 s → 719 ms", "pyperf, ±1 % std dev");
-  s.addText("2.98×", { x: M + 3.4, y: 1.5, w: 2.2, h: 0.9, isTextBox: true, margin: 0,
+  const s = lightSlide("raytrace: 2.56× faster, identical output", "Benchmark 1 — results");
+  stat(s, M, 1.55, 3.0, "804 ms → 314 ms", "release python3 · pyperf ±1 %");
+  s.addText("2.56×", { x: M + 3.4, y: 1.5, w: 2.2, h: 0.9, isTextBox: true, margin: 0,
     fontFace: HFONT, fontSize: 52, bold: true, color: FLAME });
-  s.addText("66.6 % faster\nrequirement was 7 %", { x: M + 3.4, y: 2.4, w: 2.6, h: 0.6, isTextBox: true, margin: 0,
+  s.addText("60.9 % less time\ndebug build said 2.98×\nrequirement was 7 %", { x: M + 3.4, y: 2.4, w: 2.6, h: 0.9, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 12, color: MUTED });
 
   const rows = [
-    [{ text: "metric", options: { bold: true } }, { text: "before", options: { bold: true } },
+    [{ text: "perf counter · dbg", options: { bold: true } }, { text: "before", options: { bold: true } },
      { text: "after", options: { bold: true } }, { text: "change", options: { bold: true } }],
     ["Cycles", "25.98 B", "9.02 B", "2.88× fewer"],
     ["Instructions", "53.33 B", "19.71 B", "2.71× fewer"],
@@ -449,7 +449,7 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
     fill: { color: "24282F" }, line: { color: "343A43", width: 1 } });
   s.addText("1.21×", { x: M, y: 2.35, w: 3.5, h: 0.7, isTextBox: true, margin: 0,
     fontFace: HFONT, fontSize: 34, bold: true, color: "9AA0A6", align: "center" });
-  s.addText("after fixing Huffman only", { x: M, y: 3.0, w: 3.5, h: 0.4, isTextBox: true, margin: 0,
+  s.addText("Huffman only · debug build", { x: M, y: 3.0, w: 3.5, h: 0.4, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 12, color: "9AA0A6", align: "center" });
 
   s.addText("→", { x: 4.4, y: 2.5, w: 0.8, h: 0.7, isTextBox: true, margin: 0,
@@ -459,13 +459,13 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
     fill: { color: "2A2119" }, line: { color: FLAME, width: 1 } });
   s.addText("1.44×", { x: 5.3, y: 2.35, w: 3.5, h: 0.7, isTextBox: true, margin: 0,
     fontFace: HFONT, fontSize: 34, bold: true, color: FLAME, align: "center" });
-  s.addText("after fixing the bzip2 stages", { x: 5.3, y: 3.0, w: 3.5, h: 0.4, isTextBox: true, margin: 0,
+  s.addText("+ bzip2 stages · debug build", { x: 5.3, y: 3.0, w: 3.5, h: 0.4, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 12, color: FLAME, align: "center" });
 
   s.addText("We assumed a decompressor is dominated by entropy decoding, fixed the Huffman scan, hit 1.21×, and had already cleared the 7 % requirement.", {
     x: M, y: 4.0, w: 8.2, h: 0.8, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 14, color: "C8CCD2" });
-  s.addText("The profile disagreed. The file is a .bz2, so Huffman is one of FOUR pipeline stages — and the move-to-front and inverse-BWT stages were still untouched. Re-profiling after the first fix, instead of declaring victory, produced the remaining 19 %.", {
+  s.addText("The profile disagreed. The file is a .bz2, so Huffman is one of FOUR pipeline stages — and the move-to-front and inverse-BWT stages were still untouched. Re-profiling after the first fix, instead of declaring victory, produced the remaining 19 %. (Release-interpreter final: 1.48×.)", {
     x: M, y: 4.85, w: 8.2, h: 1.1, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 14, color: WHITE });
 
@@ -483,14 +483,14 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
 
 // ========================================================== 12 pyflate result
 {
-  const s = lightSlide("pyflate: 1.44× faster, md5-verified", "Benchmark 2 — results");
-  s.addText("1.44×", { x: M, y: 1.5, w: 2.6, h: 0.95, isTextBox: true, margin: 0,
+  const s = lightSlide("pyflate: 1.48× faster, md5-verified", "Benchmark 2 — results");
+  s.addText("1.48×", { x: M, y: 1.5, w: 2.6, h: 0.95, isTextBox: true, margin: 0,
     fontFace: HFONT, fontSize: 52, bold: true, color: TEAL });
-  s.addText("3.12 s → 2.18 s\n30.1 % faster", { x: M, y: 2.45, w: 2.8, h: 0.7, isTextBox: true, margin: 0,
+  s.addText("1.12 s → 754 ms, release\n32.4 % less time\ndebug build said 1.44×", { x: M, y: 2.45, w: 2.8, h: 0.95, isTextBox: true, margin: 0,
     fontFace: BFONT, fontSize: 13, color: MUTED });
 
   const rows = [
-    [{ text: "metric", options: { bold: true } }, { text: "before", options: { bold: true } },
+    [{ text: "perf counter · dbg", options: { bold: true } }, { text: "before", options: { bold: true } },
      { text: "after", options: { bold: true } }, { text: "change", options: { bold: true } }],
     ["Cycles", "37.92 B", "26.48 B", "1.43× fewer"],
     ["Instructions", "84.21 B", "59.63 B", "1.41× fewer"],
@@ -517,6 +517,39 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
   ];
   tbl(s, rows2, M, 4.35, 11.95, [2.2, 1.15, 1.05, 7.55], 11.5);
   s.addNotes("Note the third row is honest: find_next_symbol's share went UP even though it got faster, because the total shrank. Every symbol in the stream has to be decoded exactly once - that part is intrinsic to the algorithm.");
+}
+
+// ================================================ 12b interpreter correction
+{
+  const s = lightSlide("Which Python you measure changes the answer", "A correction from review");
+  body(s, "We timed on python3-dbg because profiling needs its symbols. A reviewer pointed out that a speedup belongs on the release interpreter. Re-timing changed both answers — in opposite directions.",
+    M, 1.55, 11.9, 0.6, 14);
+
+  const rows = [
+    [{ text: "benchmark", options: { bold: true } }, { text: "release python3", options: { bold: true } },
+     { text: "debug python3-dbg", options: { bold: true } }, { text: "the debug build…", options: { bold: true } }],
+    ["raytrace", "2.56×", "2.98×", "INFLATED the speedup"],
+    ["pyflate", "1.48×", "1.44×", "UNDERSTATED the speedup"],
+  ];
+  tbl(s, rows, M, 2.3, 11.95, [2.4, 2.6, 2.75, 4.2], 13);
+
+  card(s, M, 3.45, 5.8, 1.95, "FDF1EC");
+  s.addText("raytrace — we removed allocations", { x: M + 0.3, y: 3.62, w: 5.2, h: 0.32, isTextBox: true, margin: 0,
+    fontFace: HFONT, fontSize: 14.5, bold: true, color: FLAME });
+  s.addText("In a debug build every allocation goes through a guard-byte allocator plus extra reference-count checks. We deleted ~330,000 Vector allocations per frame, so each one saved more there than it does in the release build.", {
+    x: M + 0.3, y: 3.98, w: 5.2, h: 1.3, isTextBox: true, margin: 0, fontFace: BFONT, fontSize: 11.5, color: INK });
+
+  card(s, 6.85, 3.45, 5.8, 1.95, "EAF5F5");
+  s.addText("pyflate — we swapped Python for C", { x: 7.15, y: 3.62, w: 5.2, h: 0.32, isTextBox: true, margin: 0,
+    fontFace: HFONT, fontSize: 14.5, bold: true, color: TEAL });
+  s.addText("We replaced interpreted loops with dict.get, Counter and list.pop. A debug build compiles that C with assertions and little optimisation, so the code we switched TO is slower there. (Our best explanation of a 3 % gap.)", {
+    x: 7.15, y: 3.98, w: 5.2, h: 1.3, isTextBox: true, margin: 0, fontFace: BFONT, fontSize: 11.5, color: INK });
+
+  s.addText("The fingerprint was in our profiles all along: unresolved frames such as 0xfdfdfdfdfd000053 are built from 0xFD — FORBIDDENBYTE, the debug allocator's guard byte.", {
+    x: M, y: 5.6, w: 11.9, h: 0.5, isTextBox: true, margin: 0, fontFace: BFONT, fontSize: 12.5, color: MUTED });
+  s.addText("Profile with symbols. Measure with the interpreter you ship.", {
+    x: M, y: 6.2, w: 11.9, h: 0.45, isTextBox: true, margin: 0, fontFace: HFONT, fontSize: 19, bold: true, color: INK });
+  s.addNotes("An external review caught this, and it is better told than hidden. We had used the debug interpreter for timing because the project guide requires it for profiling - correct for flame graphs, wrong for a speedup. Own the second half too: we predicted pyflate would drop as well, and it rose. The table is the point - a debug build does not bias speedups in a fixed direction; it depends on whether the optimization removed allocations or replaced Python with C.");
 }
 
 // ======================================================== 13 why hardware
@@ -675,7 +708,7 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
 {
   const s = lightSlide("The honest ceiling", "Expected performance");
   card(s, M, 1.6, 3.75, 2.0, "EAF5F5");
-  s.addText("~202 ms  →  ~1 ms", { x: M + 0.25, y: 1.85, w: 3.3, h: 0.5, isTextBox: true, margin: 0,
+  s.addText("~88 ms  →  ~1 ms", { x: M + 0.25, y: 1.85, w: 3.3, h: 0.5, isTextBox: true, margin: 0,
     fontFace: HFONT, fontSize: 21, bold: true, color: TEAL });
   s.addText("time spent in intersectionTime, replaced by 194,790 cycles at 200 MHz", {
     x: M + 0.25, y: 2.4, w: 3.3, h: 1.0, isTextBox: true, margin: 0, fontFace: BFONT, fontSize: 12, color: INK });
@@ -733,7 +766,7 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
     fontFace: HFONT, fontSize: 32, bold: true, color: WHITE });
 
   const pts = [
-    ["Both benchmarks beat the requirement", "2.98× and 1.44×, with byte-identical output verified before any number was recorded."],
+    ["Both benchmarks beat the requirement", "2.56× and 1.48× on the release interpreter, with byte-identical output verified before any number was recorded."],
     ["The speedups are removed work", "Cycles and instructions fall by the same factor with IPC flat, and page faults are unchanged — so it is compute, not artefacts."],
     ["Optimizing changes the shape of the problem", "intersectionTime went 11.8 % → 28.1 % and interpreter dispatch 28 % → 34 %. What remains is the floor software cannot reach."],
     ["The accelerator's limit is Amdahl, not arithmetic", "One pipeline makes the geometry free; the ceiling is still 1.39×, and a wider unit would change nothing."],
@@ -762,7 +795,7 @@ function tbl(s, rows, x, y, w, colW, fontSize) {
   s.addText("bash script_raytrace.sh   ·   bash script_pyflate.sh   ·   bash scripts/run_hw_sim.sh", {
     x: M, y: 4.3, w: 11, h: 0.4, isTextBox: true, margin: 0,
     fontFace: MONO, fontSize: 13, color: "9AA0A6" });
-  s.addNotes("Backup facts if asked: 17 commits; measurements all inside the QEMU guest; flame graphs sampled on cpu-clock because PEBS isn't virtualised; the Q16.16 worst-case error is 9.0e-4 absolute, 4.8e-5 relative.");
+  s.addNotes("Backup facts if asked: headline timings on release python3 (2.56x, 1.48x), profiling on python3-dbg (2.98x, 1.44x there); measurements all inside the QEMU guest; flame graphs sampled on cpu-clock because PEBS isn't virtualised; the Q16.16 worst-case error is 9.0e-4 absolute, 4.8e-5 relative.");
 }
 
 pres.writeFile({ fileName: OUT }).then(() => console.log("wrote " + OUT));

@@ -154,4 +154,38 @@ Amdahl bound stated honestly. That is why report_raytrace.txt states that the
 accelerator is capped at 1.39x and that building a wider unit would be
 pointless, rather than claiming a larger speedup.
 
+--------------------------------------------------------------------------------
+ [11] An external review, and a correction to our own prediction
+--------------------------------------------------------------------------------
+"hi, about the project, is this true?"  (followed by a pasted review)
+
+A review of the finished project reported that we had TIMED everything on
+python3-dbg but run cProfile on the normal interpreter, mixing the two, and
+predicted that on the release interpreter the raytrace speedup would be lower.
+
+We verified the claim before acting on it: the metadata inside the pyperf
+result files confirmed that all four timing runs used python3-dbg. The debug
+build was correct for profiling -- the project guide requires it so perf can
+resolve CPython's internal symbols -- but a speedup should be measured on the
+interpreter people actually run.
+
+We re-timed on /usr/bin/python3 in the VM (scripts/time_release.sh):
+
+    raytrace   2.98x (debug)  ->  2.56x (release)   the review was right
+    pyflate    1.44x (debug)  ->  1.48x (release)   our prediction was wrong
+
+Before re-timing, the assistant predicted pyflate would ALSO drop, to roughly
+1.2-1.3x. It rose instead. That forced a better explanation than "the debug
+build inflates speedups": it does not bias them in a fixed direction. raytrace
+gained by removing allocations, which the debug allocator makes
+disproportionately expensive; pyflate gained by replacing Python loops with C
+primitives, which the debug build compiles with little optimisation. The
+unresolved 0xfdfdfdfd... frames we had seen in perf report turned out to be
+the debug allocator's FORBIDDENBYTE guard pattern.
+
+All documents now quote the release numbers, show the debug numbers beside
+them, and explain why they differ. We include this because it is the clearest
+case in the project of a claim -- ours and the reviewer's -- being settled by
+measurement rather than by argument.
+
 ================================================================================

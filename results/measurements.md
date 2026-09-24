@@ -5,18 +5,30 @@ All numbers measured **inside the course QEMU/KVM guest**, never on the host.
 **Environment**
 ```
 kernel : 5.15.0-1080-kvm  (Ubuntu 22.04.5 LTS guest)
-python : Python 3.10.12 debug build (python3-dbg), GCC 11.4.0
+python : Python 3.10.12, GCC 11.4.0 -- release /usr/bin/python3 for timing,
+         debug python3-dbg for perf counters and flame graphs
 perf   : 5.15.179
 cpu    : Intel Xeon E5-2630 v3 @ 2.40GHz (Haswell), 8 vCPU under QEMU/KVM
 pyperf : 2.10.0
 ```
 
-## Headline result — `pyperf compare_to`
+## Headline result — `pyperf compare_to`, release interpreter
 
-| Benchmark | Original | Optimized | Speedup | Improvement |
+| Benchmark | Original | Optimized | Speedup | Less time |
 |---|---|---|---|---|
-| raytrace | 2.15 s ± 0.02 s | 719 ms ± 9 ms | **2.98x faster** | **66.6 %** |
-| pyflate  | 3.12 s ± 0.02 s | 2.18 s ± 0.02 s | **1.44x faster** | **30.1 %** |
+| raytrace | 804 ms ± 7 ms | 314 ms ± 2 ms | **2.56x faster** | **60.9 %** |
+| pyflate  | 1.12 s ± 0.01 s | 754 ms ± 7 ms | **1.48x faster** | **32.4 %** |
+
+Same code on the debug interpreter (`python3-dbg`):
+
+| Benchmark | Original | Optimized | Speedup |
+|---|---|---|---|
+| raytrace | 2.15 s ± 0.02 s | 719 ms ± 9 ms | 2.98x — debug *inflated* it |
+| pyflate  | 3.12 s ± 0.02 s | 2.18 s ± 0.02 s | 1.44x — debug *understated* it |
+
+The release numbers are the ones to quote. See the README section "Which
+interpreter you measure changes the answer" for why the two builds disagree, and
+in opposite directions.
 
 Both clear the project's >= 7 % bar by a wide margin. Standard deviations are
 ~1 % of the mean, so both differences are far outside measurement noise.
@@ -28,7 +40,10 @@ Both clear the project's >= 7 % bar by a wide margin. Standard deviations are
 | raytrace | sha256 of rendered PPM, original vs optimized | identical (`520b45b95e22ba0c...`) |
 | pyflate  | benchmark's built-in md5 of decompressed output | matches reference digest |
 
-## Hardware counters
+## Hardware counters (python3-dbg)
+
+These come from the debug build, which `perf` needs to resolve CPython's
+symbols; their ratios therefore describe that build, not the headline.
 
 `cycles` and `instructions` come from a dedicated two-event `perf stat` run; see
 "threats to validity" below for why they cannot be read from the nine-event run.

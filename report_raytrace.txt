@@ -4,16 +4,24 @@
  Ahmad Abd Alhaleem (322457763), Osama Abd Alhaleem (212604102)
 ================================================================================
 
-RESULT SUMMARY
-    Baseline    2.15 s  +/- 0.02 s
-    Optimized   719 ms  +/- 9 ms
-    Speedup     2.98x faster  (66.6 % reduction)   [required: >= 7 %]
+RESULT SUMMARY   (release interpreter /usr/bin/python3 -- the number to quote)
+    Baseline    804 ms  +/- 7 ms
+    Optimized   314 ms  +/- 2 ms
+    Speedup     2.56x faster  (60.9 % less time)   [required: >= 7 %]
     Output      byte-identical rendered image (sha256 verified)
 
+    The same code timed on the DEBUG interpreter (python3-dbg) measures
+    2.15 s -> 719 ms = 2.98x. The debug build inflates this speedup; section
+    4.1 explains why, and why pyflate moves the opposite way.
+
 All measurements were taken inside the course QEMU/KVM guest:
-    Ubuntu 22.04.5, kernel 5.15.0-1080-kvm, Python 3.10.12 (python3-dbg),
+    Ubuntu 22.04.5, kernel 5.15.0-1080-kvm, Python 3.10.12,
     perf 5.15.179, pyperf 2.10.0,
     Intel Xeon E5-2630 v3 @ 2.40 GHz (Haswell), 8 vCPU.
+    Timings   : release interpreter, /usr/bin/python3.
+    Profiling : python3-dbg for perf counters and flame graphs -- the project
+                guide requires it so perf can resolve CPython's internal
+                symbols. cProfile shares were taken on the release interpreter.
 
 
 ================================================================================
@@ -66,7 +74,7 @@ DATA STRUCTURES AND ALGORITHMS
  2. INITIAL ANALYSIS
 ================================================================================
 
-2.1 HARDWARE COUNTERS (perf stat, baseline)
+2.1 HARDWARE COUNTERS (perf stat, baseline, python3-dbg)
 
     Elapsed (5 loops) ............ 10.85 s
     Task-clock ................... 10 846 ms   (0.999 CPUs utilised)
@@ -223,15 +231,55 @@ DATA STRUCTURES AND ALGORITHMS
 
 4.1 END TO END (pyperf, 20 processes x 3 values each)
 
-    Baseline .......... 2.15 s +/- 0.02 s
-    Optimized ......... 719 ms +/- 9 ms
-    -------------------------------------------
-    2.98x faster, a 66.6 % reduction.
+                       release python3      debug python3-dbg
+    Baseline .......   804 ms +/- 7 ms      2.15 s +/- 0.02 s
+    Optimized ......   314 ms +/- 2 ms      719 ms +/- 9 ms
+    ------------------------------------------------------------
+    Speedup ........   2.56x                2.98x
+    Less time ......   60.9 %               66.6 %
 
-    Standard deviations are under 1.5 % of the mean, so the difference is far
-    outside measurement noise.
+    The release figure, 2.56x, is the one to quote: it is the interpreter
+    people actually run. Standard deviations are under 1.5 % of the mean in
+    every configuration, so the differences are far outside measurement noise.
 
-4.2 HARDWARE COUNTERS
+    WHICH INTERPRETER YOU MEASURE CHANGES THE ANSWER
+
+    We first timed everything on python3-dbg, because the project guide
+    requires the debug build for profiling -- it is what lets perf resolve
+    CPython's internal symbols. That is correct for flame graphs and counters,
+    but a speedup should be measured on the release interpreter, and an
+    external review of this project caught the mix. Re-timing on
+    /usr/bin/python3 moved the raytrace figure from 2.98x to 2.56x.
+
+    The debug build is not a uniformly slower copy of the release build. In a
+    Py_DEBUG build every allocation goes through the debug memory allocator,
+    which pads each block with guard bytes and fills freed memory with a
+    pattern, and every object operation performs extra reference-count checks.
+    Our raytrace optimizations are overwhelmingly REMOVED allocations and
+    method calls (Vector objects created per frame fell from 452,943 to
+    125,285), so each one saved more time on the debug build than it does on
+    the release build. The debug build inflated our speedup.
+
+    A fingerprint of that allocator was in our profiles from the start.
+    Several unresolved caller addresses in perf report, such as
+    0xfdfdfdfdfd000053, are built from 0xFD bytes -- FORBIDDENBYTE, the guard
+    value CPython's debug allocator writes at both ends of every block. They
+    are garbage frames picked up by the stack unwinder, but garbage made of
+    allocator padding. We did not recognise it until the timing discrepancy
+    sent us looking.
+
+    pyflate, remarkably, moves the OTHER way (1.44x debug, 1.48x release) --
+    see report_pyflate.txt section 4.1. So a debug build does not bias a
+    speedup in a fixed direction; it depends on what the optimization removed.
+    The practical rule: profile with symbols, measure with the interpreter you
+    ship.
+
+4.2 HARDWARE COUNTERS (perf stat, python3-dbg)
+
+    These counters come from the debug build, which perf needs to resolve
+    symbols, so their ratios describe that build rather than the headline.
+    What they establish -- that the speedup is removed work, not better
+    execution efficiency -- holds on both interpreters.
 
     Metric                Baseline     Optimized    Change
     ---------------------------------------------------------------
@@ -524,8 +572,9 @@ DATA STRUCTURES AND ALGORITHMS
     Hardware time. 179,457 sphere tests per frame at one per cycle, plus 15,333
     ray loads, is 194,790 cycles = 0.97 ms at 200 MHz.
 
-    Software time replaced. intersectionTime is 28.1 % of the optimized 719 ms,
-    i.e. roughly 202 ms.
+    Software time replaced. intersectionTime is 28.1 % of the optimized 314 ms
+    on the release interpreter -- the same interpreter the cProfile shares were
+    measured on -- i.e. roughly 88 ms.
 
     Data movement. Per frame the host sends 15,333 rays x 24 B = 0.37 MB and,
     with a struct-of-arrays scene resident on the card, streams sphere indices
@@ -533,15 +582,15 @@ DATA STRUCTURES AND ALGORITHMS
     per frame against a PCIe gen3 x8 link at ~8 GB/s is about 0.25 ms, and it
     overlaps with computation.
 
-    So the accelerated portion collapses from ~202 ms to ~1-2 ms. But that is
+    So the accelerated portion collapses from ~88 ms to ~1 ms. But that is
     NOT the speedup, because of Amdahl:
 
         S_max = 1 / (1 - 0.281) = 1.39x
 
     Even an infinitely fast RSIU cannot exceed 1.39x on this benchmark, and a
     realistic estimate including driver and DMA overhead is 1.35-1.38x. Combined
-    with the software optimization the end-to-end figure would be about 4.1x
-    versus the original baseline.
+    with the software optimization the end-to-end figure would be about 3.5x
+    versus the original baseline (804 ms -> ~227 ms).
 
     Two honest caveats. First, cProfile inflates functions that are called very
     often, and intersectionTime is called 179,457 times, so 28.1 % is likely an
@@ -551,7 +600,7 @@ DATA STRUCTURES AND ALGORITHMS
 
     The design consequence is worth stating plainly, because it runs against the
     instinct to build something impressive. Since one pipeline already reduces
-    the accelerated portion to about 1 % of frame time, WIDENING the accelerator
+    the accelerated portion to under 0.5 % of frame time, WIDENING the accelerator
     would be pointless. A 9-wide array (one unit per scene object, testing a ray
     against all objects simultaneously) would cut 0.97 ms to 0.077 ms and change
     the end-to-end result by well under 1 %. The bottleneck after offload is
@@ -607,7 +656,8 @@ DATA STRUCTURES AND ALGORITHMS
  6. CONCLUSION
 ================================================================================
 
-    Software. The benchmark was 2.98x faster (66.6 %) with byte-identical
+    Software. On the release interpreter the benchmark was 2.56x faster
+    (60.9 %) with byte-identical
     output, achieved entirely by removing overhead rather than changing the
     algorithm: the same 204,958 intersection tests are performed. The counters
     confirm the mechanism -- cycles down 2.88x, instructions down 2.71x, IPC
@@ -626,7 +676,7 @@ DATA STRUCTURES AND ALGORITHMS
     own scene with a fully quantified 9.0e-4 worst-case error.
 
     The most useful result may be the negative one. The accelerator makes the
-    geometry essentially free (202 ms -> ~1 ms), yet Amdahl caps the end-to-end
+    geometry essentially free (88 ms -> ~1 ms), yet Amdahl caps the end-to-end
     gain at 1.39x, and building a wider unit would change nothing. The lesson --
     that the value of an accelerator is set by the fraction of the workload you
     can move to it, not by how fast you can make the part you moved -- is the
@@ -638,7 +688,8 @@ DATA STRUCTURES AND ALGORITHMS
             results/raytrace_{base,opt}_flame.svg      flame graphs
             results/raytrace_{base,opt}_stat.txt       perf stat
             results/raytrace_{base,opt}_ipc.txt        cycles / instructions
-            results/raytrace_compare.txt               pyperf compare_to
+            results/raytrace_compare.txt               pyperf compare_to, python3-dbg
+            results/raytrace_compare_rel.txt           pyperf compare_to, release
             results/cprofile_{original,optimized}.txt  Python attribution
             results/hw_sim.txt                         RTL simulation log
             hw/rtl/*.v, hw/tb/*                        accelerator + testbench

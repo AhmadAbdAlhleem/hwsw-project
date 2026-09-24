@@ -9,12 +9,19 @@ with a hardware unit implemented in Verilog and verified in simulation.
 
 ## Results
 
-| Benchmark | Baseline | Optimized | Speedup | Improvement | Output verified |
+Measured on the **release** interpreter (`/usr/bin/python3`) — the one people actually run:
+
+| Benchmark | Baseline | Optimized | Speedup | Less time | Output verified |
 |---|---|---|---|---|---|
-| **raytrace** | 2.15 s ± 0.02 | 719 ms ± 9 ms | **2.98× faster** | **66.6 %** | byte-identical image (sha256) |
-| **pyflate** | 3.12 s ± 0.02 | 2.18 s ± 0.02 | **1.44× faster** | **30.1 %** | benchmark's own md5 assertion |
+| **raytrace** | 804 ms ± 7 | 314 ms ± 2 | **2.56× faster** | **60.9 %** | byte-identical image (sha256) |
+| **pyflate** | 1.12 s ± 0.01 | 754 ms ± 7 | **1.48× faster** | **32.4 %** | benchmark's own md5 assertion |
 
 Both clear the project's ≥ 7 % requirement. Standard deviations are ~1 % of the mean.
+
+Flame graphs and `perf` counters use the **debug** interpreter (`python3-dbg`), which the project
+guide requires so `perf` can resolve CPython's internal symbols. Timed on the debug build the
+speedups come out as 2.98× and 1.44× — one higher, one lower. See
+[Which interpreter you measure changes the answer](#which-interpreter-you-measure-changes-the-answer).
 
 **Hardware:** a Ray–Sphere Intersection Unit (RSIU) for raytrace's dominant function,
 simulated with Icarus Verilog against the benchmark's real scene — **9/9 correct, one
@@ -42,7 +49,7 @@ result per cycle, 30-cycle latency, worst error 9.0e-4**.
 
 ```
 Ubuntu 22.04.5 LTS guest, kernel 5.15.0-1080-kvm
-Python 3.10.12 debug build (python3-dbg), GCC 11.4.0
+Python 3.10.12: release /usr/bin/python3 for timing, debug python3-dbg for profiling
 perf 5.15.179, pyperf 2.10.0, Icarus Verilog 11.0
 Intel Xeon E5-2630 v3 @ 2.40 GHz (Haswell), 8 vCPU
 ```
@@ -70,6 +77,7 @@ Inside the guest, from the repository root:
 bash scripts/setup_vm.sh        # python3-dbg, pyperf, perf, FlameGraph
 bash script_raytrace.sh         # run + profile + compare raytrace
 bash script_pyflate.sh          # run + profile + compare pyflate
+bash scripts/time_release.sh    # headline timings on the release interpreter
 bash scripts/run_hw_sim.sh      # compile and simulate the accelerator
 ```
 
@@ -96,6 +104,31 @@ Recorded here because each silently produces wrong or empty data rather than an 
 3. **pyperf refuses to overwrite an existing result file.** On a re-run this silently
    skipped the measurement and `compare_to` reported the *previous* run's numbers. The
    scripts delete the target JSON first.
+
+## Which interpreter you measure changes the answer
+
+We first timed everything on `python3-dbg`, because profiling requires it. An external review
+pointed out that a speedup belongs on the release interpreter. Re-timing there:
+
+| Benchmark | Release `python3` | Debug `python3-dbg` | Debug build… |
+|---|---|---|---|
+| raytrace | **2.56×** | 2.98× | **inflated** it |
+| pyflate | **1.48×** | 1.44× | **understated** it |
+
+A debug build is not a uniformly slower copy of the release build, and it does not bias a speedup
+in a fixed direction:
+
+- **raytrace** gained by *removing object allocations and method calls*. In a debug build every
+  allocation goes through a guard-byte allocator and extra reference-count checks, so each removed
+  allocation saves more there — the speedup looks bigger than it is.
+- **pyflate** gained by *replacing interpreted loops with C primitives* (`dict.get`, `Counter`,
+  `list.pop`). The debug build compiles that C with assertions and little optimisation, so the code
+  we switched *to* is slower there — the speedup looks smaller. (Our best explanation of a 3 %
+  gap, not something we isolated.)
+
+The debug allocator was visible in our profiles all along: unresolved frames such as
+`0xfdfdfdfdfd000053` are built from `0xFD` — `FORBIDDENBYTE`, the guard value it writes around every
+block. **Rule: profile with symbols, measure with the interpreter you ship.**
 
 ## `perf` cannot profile Python alone
 
